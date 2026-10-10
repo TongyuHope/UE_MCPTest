@@ -1,0 +1,17 @@
+# Unreal Engine generated build artifacts
+Binaries/
+Intermediate/
+DerivedDataCache/
+Saved/
+Content/
+
+# IDE and local tooling files
+.vs/
+.vscode/
+*.suo
+*.user
+*.userprefs
+
+# OS metadata
+.DS_Store
+Thumbs.db
