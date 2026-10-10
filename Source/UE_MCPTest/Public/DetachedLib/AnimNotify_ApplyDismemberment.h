@@ -9,7 +9,7 @@
 
 /**
  * 放置在动画轨道上的断肢通知。
- * 触发时会找到动画播放者所在 Actor 上的 UDismembermentComponent，并对其调用 ApplyDismemberment。
+ * 触发时会找到动画播放者所在 Actor 上的 UDismembermentComponent，并按顺序执行请求数组。
  */
 UCLASS(DisplayName = "Apply Dismemberment")
 class UE_MCPTEST_API UAnimNotify_ApplyDismemberment : public UAnimNotify
@@ -18,13 +18,32 @@ class UE_MCPTEST_API UAnimNotify_ApplyDismemberment : public UAnimNotify
 
 public:
 	UAnimNotify_ApplyDismemberment();
+	virtual void PostLoad() override;
 
-	/** 需要断肢的骨骼及各自的冲击参数。 */
-	UPROPERTY(EditAnywhere, Category = "Dismemberment", meta = (ForceInlineRow))
+	/** Editor options only; runtime always uses the owner's component asset. */
+#if WITH_EDITORONLY_DATA
+	UPROPERTY(EditAnywhere, Category = "Dismemberment", meta = (DisplayName = "Authoring Config Data"))
+	TObjectPtr<UDismembermentConfigData> AuthoringConfigData;
+#endif
+
+	UPROPERTY(EditAnywhere, Category = "Dismemberment", meta = (TitleProperty = "BoneName"))
+	TArray<FDismembermentRequest> DismembermentRequests;
+
+	UFUNCTION()
+	TArray<FString> GetBoneNameOptions() const;
+
+	UFUNCTION()
+	TArray<FString> GetPresetNameOptions() const;
+
+	/** Idempotent; PostLoad converts old serialized map/OR switches to explicit overrides. */
+	void MigrateLegacyConfigurations();
+
+	/** Legacy serialized map. Migrated on load; hidden from new editor configuration. */
+	UPROPERTY()
 	TMap<FName, FDismembermentConfig> ApplyDismembermentConfigs;
 
-	/** 销毁每条配置指定的整个目标网格组件，适用于独立的手臂/腿部网格。 */
-	UPROPERTY(EditAnywhere, Category = "Dismemberment")
+	/** Legacy notify-level OR switch; folded into each migrated request. */
+	UPROPERTY()
 	bool bHideWholeTargetMesh = false;
 
 	virtual void Notify(USkeletalMeshComponent* MeshComp, UAnimSequenceBase* Animation,

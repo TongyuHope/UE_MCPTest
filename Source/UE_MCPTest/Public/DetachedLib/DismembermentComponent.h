@@ -10,43 +10,6 @@
 
 class USkeletalMeshComponent;
 
-/** 断肢冲击方向所在的坐标系。 */
-UENUM(BlueprintType)
-enum class ELimbSpace : uint8
-{
-	WorldSpace,
-	BoneSpace
-};
-
-/** 断肢时施加的冲击参数（供蓝图/动画通知传入）。 */
-USTRUCT(BlueprintType)
-struct FDismembermentConfig
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
-	FName TargetSkeletalMeshComponentName;
-
-	/** 隐藏整个目标网格，而不是隐藏指定骨骼及其子骨骼。适用于独立的手臂/腿部网格。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
-	bool bHideWholeTargetMesh = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
-	FVector ImpactDirection = FVector::ZeroVector;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
-	float ImpactForce = 0.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
-	FVector AngularImpulseDegrees = FVector::ZeroVector;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
-	ELimbSpace LimbSpace = ELimbSpace::BoneSpace;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
-	bool bUseWorldScale = true;
-};
-
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class UE_MCPTEST_API UDismembermentComponent : public UActorComponent
 {
@@ -64,7 +27,28 @@ public:
 		meta = (AutoCreateRefTerm = "BoneName, DismembermentConfig"))
 	bool ApplyDismemberment(const FName& BoneName, const FDismembermentConfig& DismembermentConfig);
 
-	/** 目标骨骼网格体组件名（必须与角色上的 SkeletalMeshComponent 名称一致）。 */
+	UFUNCTION(BlueprintCallable, Category = "Dismemberment", meta = (AutoCreateRefTerm = "Request"))
+	bool ApplyRegisteredDismemberment(const FDismembermentRequest& Request);
+
+	/** Ordered batch, returning the number of successful requests. */
+	UFUNCTION(BlueprintCallable, Category = "Dismemberment")
+	int32 ApplyDismembermentRequests(const TArray<FDismembermentRequest>& Requests);
+
+	UFUNCTION(BlueprintCallable, Category = "Dismemberment|Debug")
+	void DumpDismembermentDiagnostics() const;
+
+	void GetDismembermentDiagnostics(TArray<FString>& OutErrors) const;
+	EDismembermentLimbMeshType GetResolvedLimbMeshType() const;
+
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
+
+	/** Set from device/quality settings. Does not alter the shared data asset. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
+	EDismembermentLimbMeshTypeOverride LimbMeshTypeOverride = EDismembermentLimbMeshTypeOverride::UseAssetDefault;
+
+	/** Runtime component object name; None selects Character::GetMesh or a unique mesh. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment")
 	FName DrivenSkeletalMeshComponentName = FName("CharacterMesh0");
 
@@ -84,14 +68,21 @@ public:
 		TEXT("Ragdoll"));
 
 	/** 临时避让结束后，断肢继续进行物理模拟的时间（秒）。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment", meta = (ClampMin = 0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Physics", meta = (ClampMin = 0, AdvancedDisplay))
 	float LimbPhysicsSimulationTime = 5.0f;
 
 	/** 断肢 Actor 的保留时间（秒）；设为 0 时不自动销毁。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment", meta = (ClampMin = 0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Physics", meta = (ClampMin = 0, AdvancedDisplay))
 	float DetachedLimbLifeSpan = 30.0f;
 
 private:
+	void CollectDismembermentDiagnostics(TArray<FString>& OutErrors, bool bValidateHost) const;
+	USkeletalMeshComponent* ResolveDrivenMesh() const;
+	USkeletalMeshComponent* FindMeshByName(FName ComponentName) const;
+	bool ValidateTarget(FName BoneName, const FDismembermentConfig& Config,
+		USkeletalMeshComponent*& OutMesh, FString& OutError) const;
+	bool ReportFailure(FName BoneName, FName TargetName, const FString& Reason) const;
+
 	UPROPERTY()
 	TObjectPtr<USkeletalMeshComponent> DrivenSkeletalMeshComponent;
 };

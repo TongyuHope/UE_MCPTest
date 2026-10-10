@@ -1,192 +1,126 @@
 # 断肢系统接入与使用指南
 
-> 面向"在当前工程中把断肢系统跑起来"的实操步骤。
-> 本文档基于源码静态阅读整理，步骤中的具体数值（力度、时长）需要按项目手感调整。
-> 最近核对：2026-10-10。蓝图、数据资产和动画通知的实际配置尚未读取；以下是现有代码支持的操作，不代表已在 PIE 中验证。
+> 更新：2026-10-10。用户已反馈首轮验证通过；随后修复的蓝图模板校验误报待用户重新构建确认。
+> 旧资产只在未来加载时自动转换，本轮没有写入 .uasset。
 
-## 0. 用户已测试的配置基线
+## 1. 先构建，再处理旧动画
 
-以下由用户于 2026-10-10 提供，未在本轮独立打开资产验证：
+1. 在 IDE 完整构建 UE_MCPTestEditor。新增/移动了反射类型，建议关闭编辑器后构建，再重新打开工程。
+2. 打开已有断肢动画。旧通知参数会转入 DismembermentRequests，日志分类为 LogDismemberment。
+3. 核对部位、方向、力度、角冲量、目标名和摘除模式；旧参数默认都是显式覆盖，不会改用新资产默认值。
+4. 保存动画资产，持久化迁移。加载时迁移不会在本轮自动写回磁盘。
+5. 播放现有 upperarm_r 流程，对照原测试效果。
 
-| 项目 | 当前配置/结果 |
+旧的每条整网格开关与通知级整网格开关按 OR 保留效果。原 bUseWorldScale 从未起作用，迁移后为 true，保持此前始终继承模型尺度的行为。迁移后的角冲量默认仍使用世界空间。
+
+当前反射类型仍属于 UE_MCPTest 模块，原 ApplyDismemberment 蓝图节点和 Config 字段名称保留；无需为了移动头文件改蓝图节点名称。
+
+若蓝图或 C++ 直接调用旧 ApplyDismemberment，bUseWorldScale 现在会实际生效：原来传 false 仍继承尺度，现在会生成单位尺度。需要保持旧效果时将它设为 true；上述自动迁移仅处理旧动画通知。
+
+## 2. 当前用户已测试的基线
+
+以下是用户提供的信息，本轮没有重新运行验证：
+
+| 项目 | 配置 |
 | --- | --- |
-| 数据资产键 | `upperarm_r` |
-| `Limb Mesh Type` | `SkeletalMesh` |
-| `Dismemberment Skeletal Meshes` | “右手”骨骼网格 |
-| `Dismemberment Meshes` | 空 |
-| 碰撞预设 | 用户说明保持默认；类声明的最终预设默认为 `BlockAllDynamic` |
-| `BP_Dismemberment` 组件名 | 用户确认正确，具体字符串未提供 |
-| 现有断肢流程 | 用户已经实测可用，当前进入优化阶段 |
+| DA 配置键 | upperarm_r |
+| LimbMeshType | SkeletalMesh |
+| DismembermentSkeletalMeshes | “右手”骨骼网格 |
+| DismembermentMeshes | 空 |
+| 碰撞 | 默认 |
+| BP 组件对象名 | 用户确认正确，具体字符串未提供 |
+| 现有流程 | 用户已测试可用 |
 
-因此当前不需要以“修正组件名”或“修正候选数组”为前提重新接入。切换到 `StaticMesh` 测试前，必须先为 `upperarm_r` 补静态候选模型；仅修改类型开关会在生成前失败。骨骼类型与静态类型共用同一份数据资产时，现有开关仍是资产级设置，当前代码没有按设备自动选择的入口。
+因此先保持组件 LimbMeshTypeOverride = UseAssetDefault。当前静态数组为空，直接改 StaticMesh 会明确失败，需要先制作/添加静态断肢候选。
 
-动作组将自行摆通知，后续配置简化与质量档选择的提案见 [易用性改造讨论.zh-CN.md](易用性改造讨论.zh-CN.md) 第 9 节；这些接口尚未实现。
+## 3. 数据资产配置
 
-## 1. 接入清单（按顺序执行）
+在 DA_Dismemberment 的每个部位条目填写：
 
-### 步骤 1：核实驱动网格的运行时名称
+- DismembermentMeshes：静态候选，需要适合模拟的简单碰撞。
+- DismembermentSkeletalMeshes：骨骼候选，需要有效 Physics Asset。
+- DefaultConfig：默认目标组件、摘除模式、方向、力度、角冲量与空间。
+- ImpactPresets：可选的命名冲击表现，例如 Light、Strong；这些预设只改变冲击表现。
 
-在角色的 `DismembermentComponent` 上，确认 `Driven Skeletal Mesh Component Name` 与主网格组件的 `GetName()` 一致。默认值是 `CharacterMesh0`，不要仅凭编辑器里显示的 `Mesh` 改名。
+候选模型必须对齐断口 pivot。空引用会跳过；物理资源缺失会报出具体模型名。资产默认 LimbMeshType 决定 UseAssetDefault 所选数组；另一数组允许为空。
 
-本机 UE 5.7 引擎源码的 `ACharacter::MeshComponentName` 为 **`CharacterMesh0`**；当前工程 `AUE_MCPTestCharacter` 继承自 `ACharacter`，没有在构造函数中重命名该网格。工程关联 UE 5.8，实际蓝图仍请通过运行时组件名称核实；可以在蓝图中从网格组件调用 `Get Object Name` 并打印。
+命名预设不会改变摘除模式、目标组件或生成尺度。两种模型可以有不同外观，但应分别验证 pivot、尺度与碰撞；静态类型的实际性能需要在目标设备测量。
 
-> 若名称不匹配，`BeginPlay` 无法缓存驱动网格；未显式指定目标的调用会静默返回 `false`。显式目标仍可执行，但整网格模式的主体保护依赖驱动缓存，务必先配置正确。
->
-> 驱动名只在 `BeginPlay` 解析一次；运行时改名或销毁后重建组件不会自动刷新缓存。
+## 4. 动作组摆新通知
 
-### 步骤 2：创建配置数据资产
+1. 在动画需要断肢的帧添加 Apply Dismemberment 通知。
+2. Authoring Config Data 选择角色对应的配置资产，用于部位/预设下拉与编辑器校验。
+3. Dismemberment Requests 添加条目，选择 Bone Name（数据资产键）。
+4. Preset Name 选 None 使用部位默认表现，或选择对应部位的命名预设。
+5. 通常无需展开高级覆盖；需要动画独有表现时勾选相应覆盖组并填写 OverrideConfig。
 
-在内容浏览器中右键：
-
-```
-Miscellaneous → Data Asset → DismembermentConfigData
-```
-
-命名为例如 `DA_Dismemberment_Humanoid`。
-
-### 步骤 3：填写数据资产
-
-1. **`Limb Mesh Type`**：先决定断肢用静态网格还是骨骼网格。这一项决定下面填哪个数组。
-2. **`Dismemberment Configs`**：添加条目，骨骼模式的键应直接复制目标骨架中的骨骼名，避免拼写错误。键类型是 `FName`，通常比较不区分大小写，不应把仅大小写不同视为不同骨骼。
-   - 值为 `FSKMDismembermentConfig`，其中：
-     - 选 `StaticMesh` 模式就填 `Dismemberment Meshes`；
-     - 选 `SkeletalMesh` 模式就填 `Dismemberment Skeletal Meshes`。
-   - 一个部位可以放多个候选，运行期随机取一个（空引用会被跳过）。
-3. **`Dismemberment Limb Collision Profile`**：避让结束后恢复的碰撞预设，默认 `BlockAllDynamic`，不需要等待落地。
-
-> 关键约束：**只有出现在 `Dismemberment Configs` 里的骨骼才能被断肢。** 未登记的骨骼调用会被直接拒绝。
-> 整网格模式的键只用于查候选模型，不要求对应目标骨架中的真实骨骼。`Limb Mesh Type` 对整份数据资产生效，不是每条配置独立选择。
-
-### 步骤 4：在角色上挂载组件
-
-把 `Dismemberment Component` 添加到角色蓝图（或 C++ 角色的构造函数中）：
-
-- `Dismemberment Config Data` → 指向步骤 2 创建的资产。
-- `Driven Skeletal Mesh Component Name` → 步骤 1 修正后的名字。
-- 其余物理参数可先用默认值，见第 4 节。
-
-### 步骤 5：触发断肢
-
-两种方式任选：
-
-- **动画通知（推荐）**：在动画序列的轨道上添加 `Apply Dismemberment` 通知，展开 `Apply Dismemberment Configs`，按骨骼名添加条目并设置各自的方向与力度。
-- **蓝图/代码**：调用 `Apply Dismemberment`（`Bone Name` + `Dismemberment Config`）。该函数标记为 `BlueprintCallable`，且 `meta = (AutoCreateRefTerm = ...)`，在蓝图里未连接的引脚会自动生成默认结构体。
-
-### 步骤 6：验证
-
-播放包含该通知的动画，观察：
-
-1. 目标部位从角色身上消失；
-2. 断口处出现掉落的断肢，并受冲量飞出；
-3. 默认约 5.1 秒后停止物理模拟（0.1 秒避让 + 5 秒模拟，可能悬停在空中）；
-4. 约 30 秒后断肢消失。
-
-## 2. 两种使用模式怎么选
-
-### 2.1 骨骼模式（默认，适用于单一骨架角色）
-
-- `bHideWholeTargetMesh = false`（默认）。
-- `Target Skeletal Mesh Component Name` 留空即可，使用驱动网格。
-- 指定 `BoneName`，系统调用 `HideBoneByName(BoneName, PBO_Term)`，隐藏该骨骼及子层级，并终止对应层级物理体。视觉效果依赖模型蒙皮；它不切割网格或自动生成断口封面。
-  - 例：隐藏 `lowerarm_r` 会连同手掌与所有手指一起消失，实现"整条小臂断掉"。
-  - 只隐藏 `hand_r` 则只断手掌。
-- 断口位置取 `GetBoneTransform(BoneName)`，即**骨骼原点**。
-- `UnHideBoneByName` 只能取消视觉隐藏，不能自动恢复 `PBO_Term` 终止的物理体。当前库没有完整的恢复接口。
-
-### 2.2 整网格模式（适用于模块化身体）
-
-- `bHideWholeTargetMesh = true`。
-- **必须**填写 `Target Skeletal Mesh Component Name`，指向某个独立的模块化网格组件（如单独的小臂网格）。
-- 系统对该组件执行 `DestroyComponent()`，整个网格消失，断口位置取**组件变换**。
-- **硬性限制**：目标不能等于已经缓存的驱动网格，否则直接拒绝。代码没有自动识别主体/Leader Pose 关系，必须正确配置驱动缓存并只选择独立模块化组件。
-- **不可逆**：组件被销毁后无法恢复，需要重建组件或重生角色。
-
-## 3. 动画通知配置要点
-
-`UAnimNotify_ApplyDismemberment` 的两个属性：
-
-| 属性 | 作用 |
+| 覆盖组 | 生效字段 |
 | --- | --- |
-| `Apply Dismemberment Configs` | `TMap<骨骼名, FDismembermentConfig>`，一次可断多根骨骼 |
-| `bHide Whole Target Mesh` | 通知级开关，用 `\|=` 合并进每一条配置 |
+| Override Impact | 方向、力度、角冲量、线性空间、角冲量空间 |
+| Override Removal Mode | 摘除模式 |
+| Override Target Mesh | 目标组件对象名 |
+| Override World Scale | 模型是否继承断口尺度 |
 
-- 通知级开关与每条配置的开关是**逻辑或**关系：通知级设为 `true` 会让该通知下所有条目都走整网格模式。注意每条配置的 `Target Skeletal Mesh Component Name` 也必须各自填好，否则整网格模式会因目标名为空而失败。
-- 若 `Apply Dismemberment Configs` 为空，编辑器会在资产校验时报错（`IsDataValid`）。
-- 一个通知已经支持多条配置；但 `TMap` 不提供业务执行顺序，调用失败不会汇总或回滚。不要依赖父子骨骼先后次序，也不要让多个条目销毁同一组件。
-- 动画通知从播放网格的 Owner 上找断肢组件；并不自动把播放网格当作断肢目标。目标仍由驱动缓存或每条配置的目标名决定。
-- 骨骼模式没有重复触发保护，循环播放通知可能重复生成断肢。
+未勾选的覆盖组不生效，即使 OverrideConfig 中有值。勾选后 0 力度是明确的零力度，空目标名表示使用驱动网格。
 
-## 4. 参数调优参考
+预设下拉展示该资产所有部位的预设名称；选择后校验它是否存在于当前部位。Authoring Config Data 只供编辑器使用，运行时始终读取播放者 Owner 上断肢组件的资产，不会用通知引用替换角色配置。
 
-### 4.1 冲击方向与力度
+一个通知可以填多个请求，按数组顺序执行。每条失败都有日志，批量成功数会汇总；同一通知重复填写相同部位会在编辑器校验时报错。
 
-| 参数 | 说明 |
+## 5. 角色组件配置
+
+- DismembermentConfigData：角色实际使用的数据资产。
+- DrivenSkeletalMeshComponentName：主体组件的运行时对象名，默认 CharacterMesh0。不要仅凭编辑器显示的 Mesh 改名。
+- 驱动名留空：ACharacter 自动使用主网格，普通 Actor 只有一个骨骼网格时自动选择；多个候选时应明确填写。
+- LimbMeshTypeOverride：UseAssetDefault / StaticMesh / SkeletalMesh，由角色实例或游戏质量设置选择。
+- 避让、模拟和寿命参数可先保持默认。
+
+类型覆盖只影响本角色，不修改共享数据资产。不会自动回退另一类资源，也没有自动设备分档规则；这些策略由游戏初始化逻辑设置。
+
+双候选数组仍是硬引用。若低端设备需要降低资产驻留内存，还需分档资产或按需加载方案，不能仅用类型开关判断内存收益。
+
+## 6. 两种摘除模式
+
+| 模式 | 适用与要求 |
 | --- | --- |
-| `Impact Direction` | 会被**归一化**，所以只需关心方向，长度无意义 |
-| `Impact Force` | 乘在归一化方向后作为速度增量（`bVelChange = true`），结果不随断肢质量变化 |
-| `Angular Impulse Degrees` | 以度表示的角速度增量，直接传入世界空间，不随 `Limb Space` 转换；碰撞和物理约束也可能产生旋转 |
-| `Limb Space` | 只控制线性方向：`BoneSpace`（默认）随断口骨骼朝向转换，整网格模式则随目标组件朝向转换；`WorldSpace` 直接用世界方向 |
+| HideBone | 隐藏指定骨骼及子层级，终止对应物理体；直接作用于驱动姿势的网格 |
+| DestroyWholeMeshComponent | 销毁独立模块网格；必须显式指定目标、成功解析驱动网格 |
 
-`BoneSpace` 先通过带缩放的 `TransformVector`，然后归一化再乘力度。均匀正缩放不会放大力度；非均匀缩放可能改变方向，负缩放可能翻转方向，退化方向可能归零。`bUseWorldScale` 当前完全未被读取，切换它不会改变表现。
+整组件模式保护驱动网格、Character 主网格及其他组件依赖的 Leader Pose 网格。骨骼隐藏不能直接用在 Leader Pose 跟随网格上。
 
-冲量使用 `NAME_None` 选择默认物理体，对骨骼网格是根物理体；不是对全部骨骼统一施加，也不使用命中点计算偏心扭矩。
+模型不自动切割，也不自动切换成“没手”资产。UnHideBoneByName 不能自动重建 PBO_Term 终止的物理体；当前没有完整接回接口。
 
-### 4.2 物理时序
+## 7. 调整方向与物理参数
 
-| 参数 | 默认 | 调整建议 |
-| --- | --- | --- |
-| `Physical Simulation Avoidance Time` | `0.1s` | 断肢仍与宿主挤压、弹飞或抖动时**调大**；设为 `0` 会退化为"下一帧恢复"，容易看到抖动 |
-| `Physical Simulation Avoidance Collision Profile Name` | `Ragdoll` | 避让期间使用的预设，应选择一个与宿主不产生硬碰撞的预设 |
-| `Limb Physics Simulation Time` | `5s` | 停止计时器的延迟为避让时间 + 此值；停止后不显式关闭碰撞，是否挡路取决于预设 |
-| `Detached Limb Life Span` | `30s` | 断肢 Actor 存活时间；设为 `0` 表示不自动销毁（需要自行清理，否则会累积） |
-
-实际的时间轴是：
-
-```
-断肢生成 ──0.1s──► 恢复碰撞 ──5s──► 停止物理模拟（可能悬停） ──剩余时间──► 销毁
-                                    总计 30s
-```
-
-这是默认参数下的名义时间轴。时长 setter 会钳制负值；0 延迟使用 TimerManager 的下一次处理机会。LifeSpan 独立计时，如果短于物理计时器延迟，Actor 会先销毁。
-
-### 4.3 碰撞预设
-
-工程 `Config/DefaultEngine.ini` 中**没有定义任何自定义碰撞预设**，因此组件默认引用的 `Ragdoll` 与数据资产默认引用的 `BlockAllDynamic` 都来自引擎内置配置。具体通道响应请在 `项目设置 → 碰撞` 中确认。若项目使用了自定义碰撞体系，建议在这里替换成自己的预设。
-
-## 5. 制作候选模型时的约定
-
-1. **对齐 pivot**：骨骼模式以骨骼原点定位断肢，而两个网格组件使用单位相对变换。因此**模型的 pivot 必须放在断口处**，否则掉落物会明显偏移。这是最常见的"看起来不对"的原因。
-2. **一个部位多个候选**：可以配置多个候选模型做随机变化，数组中的空引用会被安全跳过。
-3. **注意缩放与物理资源**：模型继承断口世界变换；非均匀缩放还可能改变局部冲击方向。静态网格需要适合模拟的碰撞体，骨骼网格需要有效 Physics Asset；代码没有验证物理是否实际启动。
-4. **静态网格与骨骼网格的选择**：
-   - 静态网格：更省，适合形状固定的断肢。
-   - 骨骼网格：激活 `Limb Skeletal Mesh`，可使用 Physics Asset 的骨骼物理；当前代码不复制宿主姿势或动画蓝图，不能假定保持断开瞬间的姿势。
-5. **宿主与掉落物是独立资产**：系统不会自动继承宿主材质覆盖、速度，也不会自动切换到“没手”模型。这些需要另行接入。
-
-## 6. 排查清单
-
-现象 → 可能原因（按可能性排序）：
-
-| 现象 | 排查方向 |
+| 字段 | 说明 |
 | --- | --- |
-| 完全没反应，无日志 | 检查通知是否触发、Owner 是否有断肢组件、目标组件对象名、数据资产和键是否匹配；候选数组与 `Limb Mesh Type` 不一致也会在生成前返回失败 |
-| 部位没消失但生成了断肢 | 骨骼不存在会在生成前失败，不能解释此现象；检查是否选错目标组件、模型蒙皮、Leader Pose/跟随关系或其他逻辑重置了隐藏状态 |
-| 断肢生成了但模型为空/不可见 | 类型/数组不一致会在生成前失败；检查实际模型几何、材质、缩放、生成位置，以及生成后是否被其他逻辑修改 |
-| 断肢位置明显偏移 | 候选模型的 pivot 不在断口处 |
-| 断肢一生成就被弹飞/抖动 | 调大 `Physical Simulation Avoidance Time`；确认避让预设确实与宿主不硬碰 |
-| 断肢掉落但没有线性飞出 | `Impact Force` 为 0 或最终方向为零；角冲量只控制旋转，不能代替线性冲量 |
-| 断肢不模拟物理 | 检查候选模型碰撞体/Physics Asset、避让预设是否允许物理，以及引擎 Output Log；调用返回 `true` 不代表模拟成功 |
-| 断肢挡路 | 停止模拟没有显式关闭碰撞；检查预设是否阻挡 Pawn，需要时缩短 `Detached Limb Life Span` |
-| 整网格模式调用无效 | `Target Skeletal Mesh Component Name` 未填，或误填成了驱动网格名（会被硬性拒绝） |
-| 想复原角色 | 整网格模式需要重建组件；骨骼模式可取消视觉隐藏，但终止的物理体需要另外重建/初始化 |
+| ImpactDirection / ImpactForce | 方向归一化后乘力度，以速度增量施加 |
+| LimbSpace | WorldSpace 世界方向；BoneSpace 断口局部方向；CharacterSpace 角色方向 |
+| AngularImpulseDegrees | 角速度增量，以度表示 |
+| AngularImpulseSpace | 独立选空间，默认 WorldSpace；局部角冲量只旋转，不带缩放 |
+| bUseWorldScale | 控制掉落模型生成尺度，false 使用单位尺度 |
 
-## 7. 扩展建议
+BoneSpace 在整网格模式使用组件变换。线性方向的非均匀缩放可能改变方向，均匀正缩放不会放大归一化后的力度。NAME_None 选择默认物理体，骨骼网格上为根物理体，不对全部骨骼分别施加命中点冲量。
 
-若需要在现有实现上继续演进，以下几点与现有代码结构契合度较高：
+默认时间：0.1 秒恢复最终碰撞，5.1 秒停止模拟，30 秒销毁。停止模拟仍保留碰撞，可能悬停或挡路；是否阻挡角色取决于预设。0 延迟使用 TimerManager 下一次处理机会，LifeSpan 独立计时。
 
-1. **补日志**：`ApplyDismemberment` 的每个 `return false` 都无日志，是排查困难的主要来源。建议加一个专用日志分类并在各失败点输出原因。
-2. **校验候选数组一致性**：让 `FSKMDismembermentConfig::Valid()` 或 `IsDataValid` 感知 `LimbMeshType`，在编辑器阶段就阻止"填错数组"。
-3. **明确 `bUseWorldScale` 的语义后实现或删除**：目前完全未使用；须区分模型生成缩放与局部方向变换，避免把它误解为力度倍率。
-4. **对象池**：当前只做了部分复位，每次仍新建 Actor。接入池化须补 LifeSpan、速度、物理组件挂接/变换和归还流程。
-5. **生命周期收尾**：停止模拟不显式关闭碰撞。若不希望挡路，可在回调中关闭碰撞或切换为不阻挡 Pawn 的预设。
-6. **状态与恢复**：增加重复断肢保护，并分别设计视觉隐藏、终止物理体和销毁组件的恢复流程。
+## 8. 排查与验证
+
+调用 Dump Dismemberment Diagnostics，或在 Output Log 过滤 LogDismemberment。
+
+蓝图编译时，断肢组件模板没有完整的运行时 Owner/网格集合。组件校验现已在模板上下文跳过宿主查找，继续校验配置与资源；实际角色实例和断肢调用仍检查驱动网格、目标骨骼及主网格保护。若此前编译 BP_Dismemberment 出现 Driven mesh could not be resolved / Target skeletal mesh component/asset could not be resolved，构建修复代码后重新编译蓝图。若在 PIE 中仍出现同类日志，应检查实际组件对象名和网格配置。
+
+| 问题 | 排查 |
+| --- | --- |
+| 部位/预设选不到 | 给通知指定 Authoring Config Data；确认键已配置 |
+| Invalid part/preset | 运行时角色资产与通知选择不匹配 |
+| 无静态候选 | 为对应部位补 DismembermentMeshes，或选择 SkeletalMesh |
+| 模拟无法启动 | 检查 StaticMesh 简单碰撞、Physics Asset、预设与组件模拟状态；宿主会保留 |
+| 主体销毁被拒绝 | 整组件模式选到了主网格/Leader Pose 来源，或驱动尚未正确解析 |
+| 部位位置不对 | 检查实际宿主组件、骨骼原点、候选模型 pivot 与尺度 |
+| 旧通知没有预设下拉 | 旧通知仍可运行；选择 Authoring Config Data 后再转用默认/预设 |
+| 调了覆盖值没变化 | 确认对应覆盖组已经勾选 |
+
+IDE 构建后可以在编辑器 Automation 窗口运行 UE_MCPTest.Dismemberment 测试组。PhysicsPathsAndHostProtection 使用现有 DA 和临时 Cube 验证两类路径；随后仍需用正式模型做视觉与手感验收。
+
+助手未执行上述测试，用户已反馈首轮验证通过。当前待确认蓝图模板校验修复：IDE 构建后重新编译 BP_Dismemberment，并确认既有断肢流程仍可用。

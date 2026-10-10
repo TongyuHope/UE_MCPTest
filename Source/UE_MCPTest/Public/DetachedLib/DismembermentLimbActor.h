@@ -1,5 +1,4 @@
-// 掉落的断肢：一个带物理模拟的静态网格体 Actor。
-// 生成后短暂禁用碰撞（物理避让），再恢复正常碰撞，数秒后停止物理模拟。
+// Independent static/skeletal detached model, with timed collision-profile avoidance.
 
 #pragma once
 
@@ -25,7 +24,8 @@ public:
 
 	void ReInitializeLimb(const FTransform& NewTransform, EDismembermentLimbMeshType MeshType,
 		UStaticMesh* NewStaticMesh, USkeletalMesh* NewSkeletalMesh, FName NewCollisionProfileName);
-	void AddImpulse(const FVector& ImpulseDirection, float ImpactForce, const FVector& AngularImpulseDegrees);
+	bool AddImpulse(const FVector& ImpulseDirection, float ImpactForce, const FVector& AngularImpulseDegrees);
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** 设置物理避让参数（由 UDismembermentComponent 在生成断肢后调用）。 */
 	void SetPhysicalSimulationAvoidance(float InAvoidanceTime,
@@ -33,13 +33,13 @@ public:
 	void SetLimbPhysicsSimulationTime(float InPhysicsSimulationTime);
 
 protected:
-	void StartLimbPhysicsSimulation();
+	bool StartLimbPhysicsSimulation();
 	void StopLimbPhysicsSimulation() const;
 	void EnableLimbCollision() const;
 	void DisableLimbCollision() const;
 
 	float LimbPhysicsSimulationTime = 5.0f;
-	FTimerHandle ReInitializeTimerHandle;
+	FTimerHandle StopPhysicsTimerHandle;
 	FTimerHandle PhysicalSimulationAvoidanceTimerHandle;
 
 	FName CurrentCollisionProfileName;
