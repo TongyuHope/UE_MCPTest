@@ -3,6 +3,7 @@
 > 本文档基于对 `Source/UE_MCPTest` 下 `DetachedLib` 全部源码的静态阅读整理，未运行工程验证。
 > 涉及的路径均相对于工程根目录 `D:\UEProjectReal\UE_MCPTest`。
 > 最近核对：2026-10-10。已阅读四份文档、四个实现文件及配套头文件；未读取蓝图/数据资产内部配置，也未进行 PIE 验证。
+> 同日用户补充了现有资产配置和测试结果，见第 8 节；这些信息来自用户确认，与本次静态检查区分记录。
 
 ## 1. 系统定位
 
@@ -168,6 +169,19 @@ t = 30s                   Actor 被引擎销毁
 ## 8. 当前工程中的接入状态
 
 搜索 `Source` 目录，除 `DetachedLib` 自身以外，没有其他 C++ 类型引用它。`Content/Environment/LimbCharacter/` 已存在 `BP_Dismemberment.uasset`、`DA_Dismemberment.uasset` 和相关网格、动画资产；仅凭源码和文件名无法判断蓝图是否已经接入。现有入口是动画通知 `Apply Dismemberment` 和蓝图/C++ 调用 `ApplyDismemberment`。
+
+**用户已确认的测试基线（2026-10-10）**：
+
+- `没手_Skeleton` 保留手部骨骼，相关骨架的骨骼命名一致。
+- `DA_Dismemberment` 登记 `upperarm_r`；`Dismemberment Skeletal Meshes` 使用“右手”骨骼网格，`Dismemberment Meshes` 为空；`Limb Mesh Type = SkeletalMesh`，碰撞预设保持默认。此配置与当前代码的资源选择路径一致。
+- `BP_Dismemberment` 使用的组件名称正确，现有方法已经由用户测试可用；当前目标是优化已有功能。
+- 系统仍在个人测试阶段，尚未用于正式项目，资产迁移成本较低；后续由动作组自行放置通知。
+- 静态与骨骼两种断肢都需要保留，允许表现不同；静态版本拟用于低端设备。性能差异仍需实测，当前没有静态候选资产的配置。
+- 用户没有同一部位多次断肢的使用情形。本轮需求未提出接回或完整恢复功能。
+
+这些结论来自用户提供的 `C:\Users\Administrator\Desktop\新建文本文档.txt`；本次没有独立读取资产或重做运行测试。
+
+**Git 基线（本地检查）**：仓库地址为 [TongyuHope/UE_MCPTest](https://github.com/TongyuHope/UE_MCPTest.git)，当前分支 `main` 跟踪 `origin/main`。本轮文档修改前工作区干净，HEAD 与本地远程跟踪引用均为 `0d3a084`。用户说明已在另一个对话 push；本次未 fetch 或访问远端重新核验，也未执行提交/push。
 
 `UE_MCPTest.Build.cs` 已包含 `Core`、`CoreUObject`、`Engine` 等依赖；当前库使用这些模块的能力，头文件用 `DetachedLib/xxx.h` 形式包含，经 `Public/` 根目录解析。本次没有编译，不能把依赖检查视为编译通过。
 
