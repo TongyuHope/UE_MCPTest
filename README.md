@@ -34,6 +34,7 @@
 ## 文档
 
 - [断肢系统说明](Docs/Dismemberment/README.zh-CN.md)
+- [烘焙插件中文使用手册](Docs/WorldPartitionRVTBake/README.zh-CN.md)
 - [RVT 烘焙及选择性导出](Plugins/WorldPartitionRVTBake/README.md)
 - [RVT 地图导出测试记录](Plugins/WorldPartitionRVTBake/TEST_RESULTS.md)
 - [瀑布插件材质数据说明](Plugins/TYWaterfallTools/Docs/WaterfallMesh_MaterialData.zh-CN.md)
