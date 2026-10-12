@@ -5,7 +5,33 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
+
+bool FDismembermentCleanupSettings::Validate(FString& OutError) const
+{
+	OutError.Reset();
+	if (Mode != ELimbCleanupMode::Time && Mode != ELimbCleanupMode::Distance)
+	{
+		OutError = TEXT("Invalid DetachedLimbCleanupMode.");
+		return false;
+	}
+	if (!FMath::IsFinite(MaxLifeSpan) || MaxLifeSpan < 0)
+	{
+		OutError = TEXT("DetachedLimbLifeSpan must be finite and non-negative; 0 disables the lifetime limit.");
+		return false;
+	}
+	if (Mode == ELimbCleanupMode::Distance &&
+		(!FMath::IsFinite(Distance) || Distance < 0 || !FMath::IsFinite(CheckInterval) || CheckInterval <= 0 ||
+		 !FMath::IsFinite(OutOfRangeDuration) || OutOfRangeDuration < 0))
+	{
+		OutError = TEXT("Distance cleanup requires a finite non-negative distance/duration and a finite positive check interval.");
+		return false;
+	}
+	return true;
+}
 
 ADismembermentLimbActor::ADismembermentLimbActor()
 {
@@ -27,6 +53,7 @@ void ADismembermentLimbActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		World->GetTimerManager().ClearTimer(StopPhysicsTimerHandle);
 		World->GetTimerManager().ClearTimer(PhysicalSimulationAvoidanceTimerHandle);
+		World->GetTimerManager().ClearTimer(DistanceCleanupTimerHandle);
 	}
 	Super::EndPlay(EndPlayReason);
 }
@@ -38,8 +65,11 @@ void ADismembermentLimbActor::ReInitializeLimb(const FTransform& NewTransform, E
 	{
 		World->GetTimerManager().ClearTimer(StopPhysicsTimerHandle);
 		World->GetTimerManager().ClearTimer(PhysicalSimulationAvoidanceTimerHandle);
+		World->GetTimerManager().ClearTimer(DistanceCleanupTimerHandle);
 	}
 	SetLifeSpan(0.0f);
+	OutOfRangeStartTime = -1.0;
+	LastDistanceCheckPlayer.Reset();
 	ActiveLimbComponent = nullptr;
 	for (UPrimitiveComponent* Mesh : {static_cast<UPrimitiveComponent*>(LimbMesh.Get()), static_cast<UPrimitiveComponent*>(LimbSkeletalMesh.Get())})
 	{
@@ -95,6 +125,68 @@ void ADismembermentLimbActor::SetPhysicalSimulationAvoidance(float InAvoidanceTi
 void ADismembermentLimbActor::SetLimbPhysicsSimulationTime(float InPhysicsSimulationTime)
 {
 	LimbPhysicsSimulationTime = FMath::Max(0.0f, InPhysicsSimulationTime);
+}
+
+bool ADismembermentLimbActor::ConfigureCleanup(const FDismembermentCleanupSettings& Settings)
+{
+	FString Error;
+	if (!Settings.Validate(Error) || !GetWorld() || !IsValid(ActiveLimbComponent))
+	{
+		UE_LOG(LogDismemberment, Warning, TEXT("Limb=%s: cleanup initialization failed. %s"), *GetName(), *Error);
+		return false;
+	}
+	GetWorld()->GetTimerManager().ClearTimer(DistanceCleanupTimerHandle);
+	CleanupSettings = Settings;
+	OutOfRangeStartTime = -1.0;
+	LastDistanceCheckPlayer.Reset();
+	// Zero explicitly removes any previous lifetime limit, including in Distance mode.
+	SetLifeSpan(Settings.MaxLifeSpan);
+	if (Settings.Mode == ELimbCleanupMode::Distance)
+	{
+		GetWorld()->GetTimerManager().SetTimer(DistanceCleanupTimerHandle, this,
+			&ThisClass::CheckDistanceCleanup, Settings.CheckInterval, true);
+	}
+	return true;
+}
+
+void ADismembermentLimbActor::CheckDistanceCleanup()
+{
+	UWorld* World = GetWorld();
+	if (!World || !IsValid(ActiveLimbComponent)) return;
+	// Query the current pawn every time: the limb's Owner is the dismembered host,
+	// and a player pawn can be replaced during death/respawn/possession.
+	const APlayerController* Controller = UGameplayStatics::GetPlayerController(this, 0);
+	APawn* Player = IsValid(Controller) ? Controller->GetPawn() : nullptr;
+	if (!IsValid(Player))
+	{
+		OutOfRangeStartTime = -1.0;
+		LastDistanceCheckPlayer.Reset();
+		return;
+	}
+	if (LastDistanceCheckPlayer.Get() != Player)
+	{
+		OutOfRangeStartTime = -1.0;
+		LastDistanceCheckPlayer = Player;
+	}
+	// Static physics may detach the active mesh; the Actor's scene root can stay at
+	// the spawn point. Measure from the active model, not from GetActorLocation().
+	const FVector LimbLocation = ActiveLimbComponent->GetComponentLocation();
+	const FVector PlayerLocation = Player->GetActorLocation();
+	if (LimbLocation.ContainsNaN() || PlayerLocation.ContainsNaN())
+	{
+		OutOfRangeStartTime = -1.0;
+		return;
+	}
+	const double DistanceSquared = FVector::DistSquared(LimbLocation, PlayerLocation);
+	const double ThresholdSquared = FMath::Square(static_cast<double>(CleanupSettings.Distance));
+	if (DistanceSquared <= ThresholdSquared)
+	{
+		OutOfRangeStartTime = -1.0;
+		return;
+	}
+	const double Now = World->GetTimeSeconds();
+	if (OutOfRangeStartTime < 0.0) OutOfRangeStartTime = Now;
+	if (Now - OutOfRangeStartTime >= CleanupSettings.OutOfRangeDuration) Destroy();
 }
 
 bool ADismembermentLimbActor::StartLimbPhysicsSimulation()

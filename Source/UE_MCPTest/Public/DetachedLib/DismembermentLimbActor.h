@@ -13,6 +13,7 @@ class USkeletalMeshComponent;
 class UPrimitiveComponent;
 class UStaticMesh;
 class USkeletalMesh;
+class APawn;
 
 UCLASS()
 class UE_MCPTEST_API ADismembermentLimbActor : public AActor
@@ -32,15 +33,23 @@ public:
 		FName InAvoidanceCollisionProfileName);
 	void SetLimbPhysicsSimulationTime(float InPhysicsSimulationTime);
 
+	/** Starts distance cleanup and/or the optional maximum lifetime after physics succeeds. */
+	bool ConfigureCleanup(const FDismembermentCleanupSettings& Settings);
+
 protected:
 	bool StartLimbPhysicsSimulation();
 	void StopLimbPhysicsSimulation() const;
 	void EnableLimbCollision() const;
 	void DisableLimbCollision() const;
+	void CheckDistanceCleanup();
 
 	float LimbPhysicsSimulationTime = 5.0f;
 	FTimerHandle StopPhysicsTimerHandle;
 	FTimerHandle PhysicalSimulationAvoidanceTimerHandle;
+	FTimerHandle DistanceCleanupTimerHandle;
+	FDismembermentCleanupSettings CleanupSettings;
+	double OutOfRangeStartTime = -1.0;
+	TWeakObjectPtr<APawn> LastDistanceCheckPlayer;
 
 	FName CurrentCollisionProfileName;
 

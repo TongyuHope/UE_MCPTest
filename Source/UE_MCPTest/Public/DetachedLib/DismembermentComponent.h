@@ -71,11 +71,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Physics", meta = (ClampMin = 0, AdvancedDisplay))
 	float LimbPhysicsSimulationTime = 5.0f;
 
-	/** 断肢 Actor 的保留时间（秒）；设为 0 时不自动销毁。 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Physics", meta = (ClampMin = 0, AdvancedDisplay))
+	/** Time preserves the existing behavior; Distance adds periodic player-distance checks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Cleanup")
+	ELimbCleanupMode DetachedLimbCleanupMode = ELimbCleanupMode::Time;
+
+	/** 最长寿命（秒）；0 关闭时间销毁，Distance 模式仍可按距离清理。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Cleanup", meta = (ClampMin = 0, Units = "s"))
 	float DetachedLimbLifeSpan = 30.0f;
 
+	/** 三维距离（厘米）；超过此距离后开始持续超距计时。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Cleanup",
+		meta = (ClampMin = 0, Units = "cm", EditCondition = "DetachedLimbCleanupMode == ELimbCleanupMode::Distance"))
+	float DetachedLimbCleanupDistance = 3000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Cleanup",
+		meta = (ClampMin = "0.01", Units = "s", EditCondition = "DetachedLimbCleanupMode == ELimbCleanupMode::Distance"))
+	float DetachedLimbDistanceCheckInterval = 1.0f;
+
+	/** 持续超距秒数；0 表示首次检测到超距就销毁。返回范围或失去玩家时重新计时。 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dismemberment|Cleanup",
+		meta = (ClampMin = 0, Units = "s", EditCondition = "DetachedLimbCleanupMode == ELimbCleanupMode::Distance"))
+	float DetachedLimbOutOfRangeDuration = 3.0f;
+
 private:
+	FDismembermentCleanupSettings GetCleanupSettings() const;
 	void CollectDismembermentDiagnostics(TArray<FString>& OutErrors, bool bValidateHost) const;
 	USkeletalMeshComponent* ResolveDrivenMesh() const;
 	USkeletalMeshComponent* FindMeshByName(FName ComponentName) const;

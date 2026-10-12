@@ -1,6 +1,6 @@
 # 断肢系统实现细节
 
-> 更新：2026-10-10。用户已反馈首轮验证通过；随后发现并修复蓝图组件模板校验误报，此修复待用户重新构建确认。自动化测试未由助手执行。
+> 更新：2026-10-12。用户已确认单人玩家距离清理效果已实现，自动化测试未由助手执行。
 > 工程关联 UE 5.8，本机引擎路径 E:\UE_5.8。编译和运行验证由用户负责。
 
 ## 1. 共享类型
@@ -77,7 +77,7 @@ ValidateCollisionProfile 要求预设存在并允许物理碰撞。ValidateConfi
 4. 保存断口变换，按 bUseWorldScale 决定模型生成尺度。
 5. 计算线性和角冲击世界向量，生成并初始化断肢。
 6. 切换避让预设、启动模拟；失败则销毁新 Actor，保留宿主。
-7. 成功后才隐藏骨骼或销毁目标组件，并设置断肢 LifeSpan。
+7. 配置断肢清理规则，成功后才隐藏骨骼或销毁目标组件。
 
 结果 true 表示流程已成功启动；视觉对齐、姿态、碰撞手感仍需运行检查。PBO_Term 终止物理体，不能靠 UnHideBoneByName 完整恢复。
 
@@ -115,11 +115,25 @@ PostLoad 调用 MigrateLegacyConfigurations，Notify 也为 C++ 手工设置的�
 
 仍保留 SceneRoot + 静态/骨骼双组件及 ActiveLimbComponent。
 
-ReInitializeLimb 清理两个物理计时器及旧 LifeSpan，停模拟并清速度，将可能脱离根节点的组件重新挂接，重置相对变换，清除未使用类型的资源引用。它为复用改善了清理，但没有对象池管理。
+ReInitializeLimb 清理两个物理计时器、距离清理计时器及旧 LifeSpan，重置超距状态与玩家弱引用，停模拟并清速度，将可能脱离根节点的组件重新挂接，重置相对变换，清除未使用类型的资源引用。它为复用改善了清理，但没有对象池管理。
 
 AddImpulse/StartLimbPhysicsSimulation 返回 bool，检查 active component、World 和模拟是否实际启动。专用日志替代 LogTemp。EndPlay 清理计时器。
 
 默认停止模拟仍保留碰撞；没有落地检测或新收尾策略，避免改变当前测试效果。
+
+### 5.1 距离清理与可关闭的最长寿命
+
+新增 ELimbCleanupMode（Time / Distance）。组件保留旧 DetachedLimbLifeSpan 字段，新增 DetachedLimbCleanupMode、DetachedLimbCleanupDistance、DetachedLimbDistanceCheckInterval 和 DetachedLimbOutOfRangeDuration。默认 Time 保留旧资产行为，默认距离 3000 cm、间隔 1 s、持续超距 3 s。
+
+GetCleanupSettings 将组件参数复制到非反射的 FDismembermentCleanupSettings。Validate 要求合法模式、有限非负寿命；仅 Distance 模式检查距离/持续时间有限且非负、检查间隔有限且大于 0。运行时在生成断肢前校验，组件模板校验也包含这些参数。
+
+ConfigureCleanup 在物理启动成功后调用；失败时销毁新断肢并保留宿主。它重置旧清理状态，调用 SetLifeSpan(MaxLifeSpan)：0 清除寿命限制，正数在两种模式下都独立生效。Distance 模式额外设置循环 Timer，Time 模式不设置。
+
+CheckDistanceCleanup 每次获取 PlayerController 0 的 GetPawn，忽略无有效玩家的情况；Pawn 更换、暂时缺失或返回距离范围内都会重置超距计时。使用 ActiveLimbComponent->GetComponentLocation 和 Pawn->GetActorLocation 的三维距离平方比较，避免 SceneRoot 停留在生成点导致静态断肢距离失真。
+
+首次超距采样记录 World->GetTimeSeconds，后续采样达到 OutOfRangeDuration 调用 Destroy；0 在首次超距采样销毁。采样精度由 CheckInterval 决定，游戏暂停不累计。最大寿命独立运行，不因玩家暂时缺失而暂停。EndPlay 和 ReInitializeLimb 都清理新增 Timer。
+
+生成后规则保存在掉落 Actor 内，不再依赖敌人宿主是否存活；宿主组件后续改参数只影响新生成的断肢。此实现针对单人，不提供数量预算、多人距离合并或渐隐效果。
 
 ## 6. 自动化测试与待验证项
 
@@ -132,8 +146,8 @@ AddImpulse/StartLimbPhysicsSimulation 返回 bool，检查 active component、Wo
 | LegacyNotificationMigration | 序列化旧字段、OR 语义、参数保留、尺度兼容、幂等性 |
 | AuthoringOptionsAndValidation | 部位/预设选项、整组件目标规则、无效碰撞预设 |
 | BlueprintTemplateValidation | 无 Owner 的组件模板不误报网格缺失，同时保留参数、候选资源和碰撞预设校验 |
-| PhysicsPathsAndHostProtection | 加载实际 DA，使用临时物理 World 测试静态/骨骼路径及主网格保护 |
+| PhysicsPathsAndHostProtection | 加载实际 DA，使用临时物理 World 测试静态/骨骼路径、主网格保护，以及无效距离 Timer 参数不摘除宿主 |
 
 最后一项依赖工程现有 DA_Dismemberment、upperarm_r 骨骼候选和 Engine BasicShapes Cube，不保存这些资源。静态 Cube 仅用于功能测试，不能代替正式静态断肢资源。
 
-用户已反馈首轮验证通过，未明确自动化测试执行范围。蓝图模板校验修复及新增回归测试未编译或执行，需用户 IDE 构建后重新编译 BP_Dismemberment；上述测试可在 Automation 窗口运行。
+用户已反馈首轮验证通过，并确认本次距离清理效果已实现，未明确自动化测试执行范围。助手未编译或执行测试；上述测试可在 Automation 窗口运行。距离规则的完整运行验收项见 Usage 7.1 和第 8 节。

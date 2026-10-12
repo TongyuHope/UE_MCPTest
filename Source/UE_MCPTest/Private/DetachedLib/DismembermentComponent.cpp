@@ -159,9 +159,11 @@ bool UDismembermentComponent::ApplyDismemberment(const FName& BoneName, const FD
 			MeshType == EDismembermentLimbMeshType::StaticMesh ? TEXT("DismembermentMeshes") : TEXT("DismembermentSkeletalMeshes")));
 	}
 	if (!FMath::IsFinite(PhysicalSimulationAvoidanceTime) || !FMath::IsFinite(LimbPhysicsSimulationTime) ||
-		!FMath::IsFinite(DetachedLimbLifeSpan) || !FMath::IsFinite(PhysicalSimulationAvoidanceTime + LimbPhysicsSimulationTime) ||
-		PhysicalSimulationAvoidanceTime < 0 || LimbPhysicsSimulationTime < 0 || DetachedLimbLifeSpan < 0)
-		return Fail(TEXT("Physics times and LifeSpan must be finite and non-negative."));
+		!FMath::IsFinite(PhysicalSimulationAvoidanceTime + LimbPhysicsSimulationTime) ||
+		PhysicalSimulationAvoidanceTime < 0 || LimbPhysicsSimulationTime < 0)
+		return Fail(TEXT("Physics times and their sum must be finite and non-negative."));
+	const FDismembermentCleanupSettings Cleanup = GetCleanupSettings();
+	if (!Cleanup.Validate(Error)) return Fail(Error);
 	if (!UDismembermentConfigData::ValidateCollisionProfile(DismembermentConfigData->DismembermentLimbCollisionProfile.Name, Error) ||
 		!UDismembermentConfigData::ValidateCollisionProfile(PhysicalSimulationAvoidanceCollisionProfileName.Name, Error)) return Fail(Error);
 	UStaticMesh* StaticMesh = nullptr;
@@ -203,11 +205,26 @@ bool UDismembermentComponent::ApplyDismemberment(const FName& BoneName, const FD
 		LimbActor->Destroy();
 		return Fail(TEXT("Limb physics did not start. Host removal was cancelled."));
 	}
+	if (!LimbActor->ConfigureCleanup(Cleanup))
+	{
+		LimbActor->Destroy();
+		return Fail(TEXT("Limb cleanup could not be configured. Host removal was cancelled."));
+	}
 	// Only remove the host after the detached model and physics are ready.
 	if (bDestroyMesh) TargetMesh->DestroyComponent();
 	else TargetMesh->HideBoneByName(BoneName, PBO_Term);
-	LimbActor->SetLifeSpan(DetachedLimbLifeSpan);
 	return true;
+}
+
+FDismembermentCleanupSettings UDismembermentComponent::GetCleanupSettings() const
+{
+	FDismembermentCleanupSettings Settings;
+	Settings.Mode = DetachedLimbCleanupMode;
+	Settings.MaxLifeSpan = DetachedLimbLifeSpan;
+	Settings.Distance = DetachedLimbCleanupDistance;
+	Settings.CheckInterval = DetachedLimbDistanceCheckInterval;
+	Settings.OutOfRangeDuration = DetachedLimbOutOfRangeDuration;
+	return Settings;
 }
 
 void UDismembermentComponent::GetDismembermentDiagnostics(TArray<FString>& OutErrors) const
@@ -227,9 +244,10 @@ void UDismembermentComponent::CollectDismembermentDiagnostics(TArray<FString>& O
 	if (!UDismembermentConfigData::ValidateCollisionProfile(PhysicalSimulationAvoidanceCollisionProfileName.Name, Error)) OutErrors.Add(Error);
 	if (!UDismembermentConfigData::ValidateCollisionProfile(DismembermentConfigData->DismembermentLimbCollisionProfile.Name, Error)) OutErrors.Add(Error);
 	if (!IsValidMeshTypeOverride(LimbMeshTypeOverride)) OutErrors.Add(TEXT("Invalid LimbMeshTypeOverride."));
-	if (!FMath::IsFinite(PhysicalSimulationAvoidanceTime) || !FMath::IsFinite(LimbPhysicsSimulationTime) || !FMath::IsFinite(DetachedLimbLifeSpan) ||
+	if (!FMath::IsFinite(PhysicalSimulationAvoidanceTime) || !FMath::IsFinite(LimbPhysicsSimulationTime) ||
 		!FMath::IsFinite(PhysicalSimulationAvoidanceTime + LimbPhysicsSimulationTime) ||
-		PhysicalSimulationAvoidanceTime < 0 || LimbPhysicsSimulationTime < 0 || DetachedLimbLifeSpan < 0) OutErrors.Add(TEXT("Physics times and LifeSpan must be finite and non-negative."));
+		PhysicalSimulationAvoidanceTime < 0 || LimbPhysicsSimulationTime < 0) OutErrors.Add(TEXT("Physics times and their sum must be finite and non-negative."));
+	if (!GetCleanupSettings().Validate(Error)) OutErrors.Add(Error);
 	if (DismembermentConfigData->DismembermentConfigs.IsEmpty()) OutErrors.Add(TEXT("DismembermentConfigs is empty."));
 	const EDismembermentLimbMeshType MeshType = GetResolvedLimbMeshType();
 	if (MeshType != EDismembermentLimbMeshType::StaticMesh && MeshType != EDismembermentLimbMeshType::SkeletalMesh) OutErrors.Add(TEXT("Invalid asset LimbMeshType."));

@@ -1,6 +1,6 @@
 # 断肢系统接入与使用指南
 
-> 更新：2026-10-10。用户已反馈首轮验证通过；随后修复的蓝图模板校验误报待用户重新构建确认。
+> 更新：2026-10-12。用户已确认单人玩家距离清理效果已实现；助手未构建或运行测试。
 > 旧资产只在未来加载时自动转换，本轮没有写入 .uasset。
 
 ## 1. 先构建，再处理旧动画
@@ -104,6 +104,28 @@ BoneSpace 在整网格模式使用组件变换。线性方向的非均匀缩放�
 
 默认时间：0.1 秒恢复最终碰撞，5.1 秒停止模拟，30 秒销毁。停止模拟仍保留碰撞，可能悬停或挡路；是否阻挡角色取决于预设。0 延迟使用 TimerManager 下一次处理机会，LifeSpan 独立计时。
 
+### 7.1 按玩家距离清理掉落断肢
+
+在角色 DismembermentComponent 的 Dismemberment|Cleanup 分类配置：
+
+| 字段 | 含义与示例 |
+| --- | --- |
+| DetachedLimbCleanupMode | Time 为原有时间模式；选择 Distance 启用距离清理 |
+| DetachedLimbLifeSpan | 最长寿命（秒），两种模式都生效；0 关闭时间上限 |
+| DetachedLimbCleanupDistance | 三维距离（厘米），默认 3000，即 30 米 |
+| DetachedLimbDistanceCheckInterval | 循环 Timer 检查间隔（秒），默认 1，必须大于 0 |
+| DetachedLimbOutOfRangeDuration | 持续超距时间（秒），默认 3；0 表示首次检测到超距就销毁 |
+
+纯距离配置示例：Distance、LifeSpan = 0、Distance = 3000、Interval = 1、Duration = 3。首次采样发现玩家超过 30 米后开始计时，后续采样持续超距至少 3 秒时销毁；采样时返回范围内（含边界）则清空计时。检测按 Timer 采样，可能比实际越界稍晚，也不会识别两次采样间的短暂折返。
+
+如需时间兜底，将 LifeSpan 设置为正数，例如 120：即使玩家一直在附近，也会在生成后约 120 秒销毁。纯时间模式的 LifeSpan = 0 则不会由本系统自动清理。
+
+比较对象是 PlayerController 0 当前控制的 Pawn，不是被断肢的敌人，也不是旁观者镜头。没有有效玩家 Pawn 时重置超距计时并等待；玩家重生或更换 Pawn 后重新计时。启用的最长寿命仍继续运行。距离与持续时间使用游戏世界时间，暂停不会累加。
+
+断肢位置取 ActiveLimbComponent 的世界位置，静态模型物理脱离 SceneRoot 后仍以模型所在位置判定。距离清理独立于碰撞避让与停止物理模拟，两类模型和两种 Removal Mode 共用此规则。新参数在生成时复制到掉落 Actor，修改宿主组件只影响之后生成的断肢。
+
+已有资产默认仍为 Time，需要手工选择 Distance。本轮没有保存蓝图或其他 .uasset，也未添加数量上限、统一管理器或对象池。
+
 ## 8. 排查与验证
 
 调用 Dump Dismemberment Diagnostics，或在 Output Log 过滤 LogDismemberment。
@@ -123,4 +145,4 @@ BoneSpace 在整网格模式使用组件变换。线性方向的非均匀缩放�
 
 IDE 构建后可以在编辑器 Automation 窗口运行 UE_MCPTest.Dismemberment 测试组。PhysicsPathsAndHostProtection 使用现有 DA 和临时 Cube 验证两类路径；随后仍需用正式模型做视觉与手感验收。
 
-助手未执行上述测试，用户已反馈首轮验证通过。当前待确认蓝图模板校验修复：IDE 构建后重新编译 BP_Dismemberment，并确认既有断肢流程仍可用。
+助手未执行上述测试，用户已反馈首轮验证通过，并确认距离清理效果已实现。未明确逐项验收范围；完整验收可覆盖近处保留、持续超距销毁、折返重置、LifeSpan = 0/正数、玩家重生，以及静态断肢滚离生成点后的距离判定。

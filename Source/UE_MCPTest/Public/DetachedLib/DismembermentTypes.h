@@ -19,6 +19,26 @@ enum class ELimbRemovalMode : uint8
 	DestroyWholeMeshComponent
 };
 
+/** Cleanup of the detached Actor, independently of host removal and physics timers. */
+UENUM(BlueprintType)
+enum class ELimbCleanupMode : uint8
+{
+	Time,
+	Distance
+};
+
+/** Runtime snapshot copied from the spawning component; shared assets are unchanged. */
+struct UE_MCPTEST_API FDismembermentCleanupSettings
+{
+	ELimbCleanupMode Mode = ELimbCleanupMode::Time;
+	float MaxLifeSpan = 30.0f;
+	float Distance = 3000.0f;
+	float CheckInterval = 1.0f;
+	float OutOfRangeDuration = 3.0f;
+
+	bool Validate(FString& OutError) const;
+};
+
 UENUM(BlueprintType)
 enum class EDismembermentLimbMeshTypeOverride : uint8
 {

@@ -236,6 +236,13 @@ bool FDismembermentPhysicsPathsTest::RunTest(const FString& Parameters)
 		}
 		FDismembermentRequest Request;
 		Request.BoneName = TEXT("upperarm_r");
+		Component->DetachedLimbCleanupMode = ELimbCleanupMode::Distance;
+		Component->DetachedLimbDistanceCheckInterval = 0.0f;
+		AddExpectedError(TEXT("finite positive check interval"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestFalse(TEXT("Invalid distance timer configuration fails before host removal"), Component->ApplyRegisteredDismemberment(Request));
+		TestFalse(TEXT("Invalid cleanup configuration keeps host bone visible"), Host->GetMesh()->IsBoneHiddenByName(TEXT("upperarm_r")));
+		Component->DetachedLimbCleanupMode = ELimbCleanupMode::Time;
+		Component->DetachedLimbDistanceCheckInterval = 1.0f;
 		TestTrue(TEXT("Registered physics path succeeds"), Component->ApplyRegisteredDismemberment(Request));
 		TestTrue(TEXT("Host bone hidden after successful physics"), Host->GetMesh()->IsBoneHiddenByName(TEXT("upperarm_r")));
 	}
