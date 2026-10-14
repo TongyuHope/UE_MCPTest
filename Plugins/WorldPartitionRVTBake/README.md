@@ -4,6 +4,30 @@ This editor-only plugin builds the streaming low mips for one large Runtime Virt
 
 Why this is needed: UE's stock RVT builder (`RuntimeVirtualTextureBuildStreamingMips.cpp`) loads every RVT writer actor at once, which does not fit an open world. The tiled builder keeps only one tile's writers resident at a time.
 
+## HLOD and editor MiniMap (UE 5.8)
+
+`Scripts/Build-HLOD.ps1` and `Scripts/Build-MiniMap.ps1` call Epic's official
+`WorldPartitionHLODsBuilder` / `WorldPartitionMiniMapBuilder` without engine changes.
+They default to UE_MCPTest's `/Game/Level/BakeTest`, disable Python startup scripts,
+record separate logs, and support a `-Preview` that returns arguments without launching UE.
+Use `-GeneratePCG -PCGGraphs @('BakeTest')` to first generate and save PCG with the
+official PCG builder. A failed prepass stops the later build.
+
+```powershell
+& '.\Plugins\WorldPartitionRVTBake\Scripts\Build-HLOD.ps1' -Preview
+& '.\Plugins\WorldPartitionRVTBake\Scripts\Build-HLOD.ps1' -Action SetupBuild
+& '.\Plugins\WorldPartitionRVTBake\Scripts\Build-MiniMap.ps1' -DebugCapture
+```
+
+HLOD requires configured HLOD Layers/participating actors and should target the actual
+runtime map. The reduced RVT map cannot produce proxies for actors excluded from it.
+MiniMap is the World Partition editor preview, not a packaged game's HUD minimap.
+Its resolution, loading cell size, capture channel and warmup frames come from the
+map's `WorldPartitionMiniMap` actor. PCG generated transiently during an RVT bake is
+not saved and cannot be reused by these separate processes.
+
+[Chinese usage guide and parameters](../../Docs/WorldPartitionRVTBake/HLOD-MiniMap.zh-CN.md).
+
 ## Selective bake-map export (UE 5.8)
 
 `WorldPartitionRVTBakeMapBuilder` creates a new World Partition map from actor descriptors.

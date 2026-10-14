@@ -282,3 +282,7 @@ RVT `ValidateOnly` 报告 8192×8192、32×32 个 tile、512 MiB 像素缓冲。
 - [导出测试记录](../../Plugins/WorldPartitionRVTBake/TEST_RESULTS.md)
 - [选择性导出脚本](../../Plugins/WorldPartitionRVTBake/Scripts/Export-BakeMap.ps1)
 - [导出验证脚本](../../Plugins/WorldPartitionRVTBake/Scripts/Validate-BakeMap.py)
+
+## HLOD 与编辑器小地图
+
+插件新增了调用官方 HLOD / MiniMap 构建器的 PowerShell 入口，详见 [使用指南](HLOD-MiniMap.zh-CN.md)。
