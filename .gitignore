@@ -19,6 +19,12 @@
 /Plugins/*
 !/Plugins/WorldPartitionRVTBake/
 !/Plugins/TYWaterfallTools/
+!/Plugins/TerraceTools/
+
+/Plugins/TerraceTools/*
+!/Plugins/TerraceTools/Source/
+!/Plugins/TerraceTools/Resources/
+!/Plugins/TerraceTools/TerraceTools.uplugin
 
 /Plugins/WorldPartitionRVTBake/*
 !/Plugins/WorldPartitionRVTBake/Source/
