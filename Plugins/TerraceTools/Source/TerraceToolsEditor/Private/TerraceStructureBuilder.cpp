@@ -21,7 +21,7 @@
 
 namespace
 {
-    bool CanEdit(ATerraceGroupActor* Group, FText& OutError)
+    bool CanEditStructures(ATerraceGroupActor* Group, FText& OutError)
     {
         if (!IsValid(Group) || !Group->GetWorld() || Group->GetWorld()->WorldType != EWorldType::Editor
             || !GEditor || GEditor->PlayWorld)
@@ -37,7 +37,7 @@ namespace
         return true;
     }
 
-    ATerraceStructureActor* GetOwnedOutput(ATerraceGroupActor* Group)
+    ATerraceStructureActor* GetOwnedStructureOutput(ATerraceGroupActor* Group)
     {
         ATerraceStructureActor* Output = Group->GeneratedStructureOutput.Get();
         return IsValid(Output) && Output->SourceGroup.Get() == Group && Output->GetOwner() == Group ? Output : nullptr;
@@ -46,7 +46,7 @@ namespace
 
 bool TerraceStructureBuilder::Update(ATerraceGroupActor* Group, FText& OutReport)
 {
-    if (!CanEdit(Group, OutReport) || !Group->StructureSettings.Validate(OutReport))
+    if (!CanEditStructures(Group, OutReport) || !Group->StructureSettings.Validate(OutReport))
     {
         return false;
     }
@@ -227,7 +227,7 @@ bool TerraceStructureBuilder::Update(ATerraceGroupActor* Group, FText& OutReport
             Component->SetMaterial(Section, Section == 0 ? BundMaterials[I] : BankMaterials[I]);
         }
     }
-    ATerraceStructureActor* OldOutput = GetOwnedOutput(Group);
+    ATerraceStructureActor* OldOutput = GetOwnedStructureOutput(Group);
     Group->GeneratedStructureOutput = Output;
     if (OldOutput)
     {
@@ -248,13 +248,13 @@ bool TerraceStructureBuilder::Update(ATerraceGroupActor* Group, FText& OutReport
 
 bool TerraceStructureBuilder::Clear(ATerraceGroupActor* Group, FText& OutReport)
 {
-    if (!CanEdit(Group, OutReport))
+    if (!CanEditStructures(Group, OutReport))
     {
         return false;
     }
     const FScopedTransaction Transaction(LOCTEXT("Clear", "Clear Terrace Structures"));
     Group->Modify();
-    if (ATerraceStructureActor* Output = GetOwnedOutput(Group))
+    if (ATerraceStructureActor* Output = GetOwnedStructureOutput(Group))
     {
         Group->GetWorld()->EditorDestroyActor(Output, true);
     }

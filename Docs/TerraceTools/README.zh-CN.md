@@ -1,6 +1,6 @@
 # TerraceTools 使用与当前进度
 
-更新日期：2026-10-21。对应代码版本：0.4.0，当前采用 Landscape 台地 + 用户 PCG 图沿线生成田埂。
+更新日期：2026-10-21。对应代码版本：0.4.1，当前采用 Landscape 台地 + 用户 PCG 图沿线生成田埂。
 
 - [完整规划](规划.zh-CN.md)
 - [编译与测试清单](测试清单.zh-CN.md)
@@ -18,6 +18,8 @@
 0.3.0 用户反馈台地可见、结构生成触发支撑高度错误。0.3.1 增加自动平坦支撑余量、同步护坡范围及具体高度诊断；用户随后反馈可以生成田埂护坡，未提供逐项验收记录。余量会扩大台地占地，详见 [M2 故障说明与操作](M2田埂与护坡.zh-CN.md)。
 
 0.4.0 给 Plot 增加 TerracePlot / TerracePCGReady 标签、田面标高闭合输出样条 PCGBundSpline（组件标签 TerracePCGBundSpline）、可读取的 PCGData，以及 Plot/Group 的同步按钮。用户自行构建 PCG 图和田埂资产；本轮未创建 Graph 资产，未编译/运行测试，按用户要求先提交版本控制。地形抬高田埂留到后续试验。
+
+0.4.1 根据用户编译日志修复 Unity Build 合并两个 Editor 源文件时的匿名命名空间函数冲突：地形/结构分别使用 GetOwnedTerrainOutput / GetOwnedStructureOutput，并将 CanEdit 拆为各自名称，避免 const 重载导致误调用。修复只做源码检查，待用户重新编译。
 
 Plot 参数位于靠前的 **梯田工具 / Terrace Tools · 参数**；操作位于 **梯田工具 / Terrace Tools · 操作**。主流程为更新地形、等待完成、同步 PCG 输入、在用户图中手动 Generate。原过程网格保留在 **梯田工具 / Terrace Tools · 网格实验**；主栏可清理旧网格。插件不自动清理或重建外部 PCG 结果。水面、台阶、垂直石墙、作物与烘焙尚未实现。
 

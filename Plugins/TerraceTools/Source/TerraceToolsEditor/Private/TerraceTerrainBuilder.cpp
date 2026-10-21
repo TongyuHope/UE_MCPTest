@@ -23,7 +23,7 @@
 
 namespace
 {
-    bool CanEdit(const ATerraceGroupActor* Group, FText& OutError)
+    bool CanEditTerrain(const ATerraceGroupActor* Group, FText& OutError)
     {
         if (!IsValid(Group) || !Group->GetWorld() || Group->GetWorld()->WorldType != EWorldType::Editor
             || !GEditor || GEditor->PlayWorld)
@@ -54,7 +54,7 @@ namespace
         Group->GeneratedStructureOutput.Reset();
     }
 
-    ATerraceTerrainOutputActor* GetOwnedOutput(ATerraceGroupActor* Group)
+    ATerraceTerrainOutputActor* GetOwnedTerrainOutput(ATerraceGroupActor* Group)
     {
         auto* Output = Cast<ATerraceTerrainOutputActor>(Group->GeneratedTerrainOutput.Get());
         return IsValid(Output) && Output->SourceGroup.Get() == Group && Output->GetOwner() == Group ? Output : nullptr;
@@ -106,7 +106,7 @@ namespace
 
 bool TerraceTerrainBuilder::Update(ATerraceGroupActor* Group, FText& OutReport)
 {
-    if (!CanEdit(Group, OutReport))
+    if (!CanEditTerrain(Group, OutReport))
     {
         return false;
     }
@@ -130,7 +130,7 @@ bool TerraceTerrainBuilder::Update(ATerraceGroupActor* Group, FText& OutReport)
         OutReport = LOCTEXT("LandscapeTransform", "首版要求 Landscape 无旋转、正向缩放，并具有有效编辑层。");
         return false;
     }
-    ATerraceTerrainOutputActor* OldOutput = GetOwnedOutput(Group);
+    ATerraceTerrainOutputActor* OldOutput = GetOwnedTerrainOutput(Group);
     if (OldOutput && OldOutput->HasEnabledContribution() && OldOutput->AppliedLandscape.Get() != Landscape)
     {
         OutReport = LOCTEXT("SwitchTarget", "更换 Landscape 前，请先移除旧地形贡献。");
@@ -284,11 +284,11 @@ bool TerraceTerrainBuilder::Update(ATerraceGroupActor* Group, FText& OutReport)
 
 bool TerraceTerrainBuilder::RemoveContribution(ATerraceGroupActor* Group, FText& OutReport)
 {
-    if (!CanEdit(Group, OutReport))
+    if (!CanEditTerrain(Group, OutReport))
     {
         return false;
     }
-    ATerraceTerrainOutputActor* Output = GetOwnedOutput(Group);
+    ATerraceTerrainOutputActor* Output = GetOwnedTerrainOutput(Group);
     const FScopedTransaction Transaction(LOCTEXT("RemoveTransaction", "Remove Terrace Landscape Contribution"));
     Group->Modify();
     RemoveOwnedStructures(Group);
