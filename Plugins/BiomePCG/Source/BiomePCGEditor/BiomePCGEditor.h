@@ -19,17 +19,17 @@ private:
     void RegisterSplinePainterMenu();
     void HandleAssetsOpening(const TArray<UObject*>& Assets, IAssetEditorInstance* AssetEditorInstance);
     void HandleObjectPreSave(UObject* Object, FObjectPreSaveContext SaveContext);
-    bool RunRequestedMigration(float DeltaTime);
+    bool RunRequestedCleanup(float DeltaTime);
 
-    int32 EnsureAssetProjectionDebug(UObject* Asset);
-    int32 EnsureBlueprintProjectionDebug(UBlueprint* Blueprint);
-    bool EnsureBlueprintGraphProjectionDebug(UEdGraph* Graph);
-    bool EnsurePCGGraphProjectionDebug(UPCGGraph* PCGGraph);
-    void ApplyAllProjectionDebugAndExit();
+    int32 RemoveAssetProjectionDebug(UObject* Asset);
+    int32 RemoveBlueprintProjectionDebug(UBlueprint* Blueprint);
+    bool RemoveBlueprintGraphProjectionDebug(UEdGraph* Graph);
+    bool RemovePCGGraphProjectionDebug(UPCGGraph* PCGGraph);
+    void RemoveAllProjectionDebugAndExit();
 
     FDelegateHandle AssetEditorOpeningHandle;
     FDelegateHandle ObjectPreSaveHandle;
-    FTSTicker::FDelegateHandle MigrationTickerHandle;
+    FTSTicker::FDelegateHandle CleanupTickerHandle;
     FDelegateHandle SplineMenuCallbackHandle;
     bool bSplinePainterRegistered = false;
 };

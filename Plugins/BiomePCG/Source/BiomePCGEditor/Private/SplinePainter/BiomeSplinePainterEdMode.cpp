@@ -44,6 +44,11 @@ UBiomeSplinePainterSettings* FBiomeSplinePainterEdMode::GetSettings() const
     return Settings.Get();
 }
 
+bool FBiomeSplinePainterEdMode::IsClickPointMode() const
+{
+    return Settings->DrawingMode == EBiomeSplineDrawingMode::ClickPoints;
+}
+
 void FBiomeSplinePainterEdMode::Enter()
 {
     FEdMode::Enter();
@@ -85,7 +90,15 @@ FText FBiomeSplinePainterEdMode::GetStatus() const
     }
     if (bDrawing)
     {
-        Text += FString::Printf(TEXT("\n当前笔画：%d 个控制点，松开左键提交。"), StrokePoints.Num());
+        Text += bPointByPointStroke
+            ? FString::Printf(TEXT("\n当前线：%d 个已确认点。Enter 或“完成当前线”提交；Backspace 回退。"), StrokePoints.Num())
+            : FString::Printf(TEXT("\n当前笔画：%d 个控制点，松开左键提交。"), StrokePoints.Num());
+    }
+    else if (Settings->TargetActor.IsValid())
+    {
+        Text += IsClickPointMode()
+            ? TEXT("\n逐点点击：单击添加第一点，再次单击添加下一点。")
+            : TEXT("\n长按拖动：按住左键画线，松开提交。");
     }
     return FText::FromString(Text);
 }
@@ -106,7 +119,7 @@ void FBiomeSplinePainterEdMode::UseSelection()
             Settings->Graph = Target->PCGComponent ? Target->PCGComponent->GetGraph() : nullptr;
             Settings->bAutoRefreshPCG = Target->bAutoRefreshPCG;
             SelectedSpline.Reset();
-            Status = LOCTEXT("Ready", "按住左键绘制新样条，松开提交。");
+            Status = LOCTEXT("Ready", "目标已就绪，请按所选绘制方式开始新线。");
             return;
         }
     }
@@ -219,7 +232,7 @@ bool FBiomeSplinePainterEdMode::PlaceActor(UWorld* World, const FVector& Locatio
     Settings->TargetActor = Target;
     GEditor->SelectNone(false, true, false);
     GEditor->SelectActor(Target, true, true);
-    Status = LOCTEXT("Placed", "Actor 已放置。再次按住左键开始一条新线；请保存新蓝图和关卡。");
+    Status = LOCTEXT("Placed", "Actor 已放置，请按所选方式开始新线；请保存新蓝图和关卡。");
     return true;
 }
 
@@ -291,11 +304,11 @@ void FBiomeSplinePainterEdMode::UpdatePointer(FEditorViewportClient* Client, FVi
     bHasHover = TraceSurface(Client, Viewport, X, Y, Hit);
     if (!bHasHover)
     {
-        bHadSurfaceGap |= bDrawing;
+        bHadSurfaceGap |= bDrawing && !bPointByPointStroke;
         return;
     }
     HoverPosition = Hit.ImpactPoint;
-    if (!bDrawing || StrokeViewport != Viewport || StrokePoints.IsEmpty())
+    if (!bDrawing || bPointByPointStroke || StrokeViewport != Viewport || StrokePoints.IsEmpty())
     {
         return;
     }
@@ -322,12 +335,34 @@ bool FBiomeSplinePainterEdMode::InputKey(FEditorViewportClient* Client, FViewpor
     {
         return false;
     }
+    if (bDrawing && bPointByPointStroke != IsClickPointMode())
+    {
+        CancelCurrentSpline();
+        Status = LOCTEXT("ModeChanged", "绘制方式已切换，未提交的线已取消；已保存样条保留。");
+    }
+    if (HasPendingPointSpline() && Event == IE_Pressed)
+    {
+        if (Key == EKeys::Enter && !Client->IsAltPressed() && !Client->IsCtrlPressed())
+        {
+            CompleteCurrentSpline();
+            return true;
+        }
+        if (Key == EKeys::BackSpace || (Key == EKeys::Z && Client->IsCtrlPressed()))
+        {
+            RemoveLastClickedPoint();
+            return true;
+        }
+        if (Key == EKeys::Y && Client->IsCtrlPressed())
+        {
+            Status = LOCTEXT("PointRedoHint", "请先完成或取消当前线，再使用编辑器重做。");
+            return true;
+        }
+    }
     if (Key == EKeys::Escape && Event == IE_Pressed)
     {
         if (bDrawing)
         {
-            CancelStroke();
-            Status = LOCTEXT("Cancelled", "当前笔画已取消，已保存样条保留。");
+            CancelCurrentSpline();
         }
         else
         {
@@ -346,7 +381,7 @@ bool FBiomeSplinePainterEdMode::InputKey(FEditorViewportClient* Client, FViewpor
     }
     if (Event == IE_Released && bLeftSequence)
     {
-        if (bDrawing && StrokeViewport == Viewport)
+        if (bDrawing && !bPointByPointStroke && StrokeViewport == Viewport)
         {
             FIntPoint Mouse;
             Viewport->GetMousePos(Mouse);
@@ -388,10 +423,31 @@ bool FBiomeSplinePainterEdMode::InputKey(FEditorViewportClient* Client, FViewpor
         Status = LOCTEXT("InvalidTarget", "目标不在当前可编辑世界，或其关卡已锁定。");
         return true;
     }
+    if (HasPendingPointSpline())
+    {
+        if (StrokeTarget.Get() != Target)
+        {
+            CancelCurrentSpline();
+            return true;
+        }
+        // Clicks, not pointer motion or freehand spacing, define the confirmed vertices.
+        if (FVector::DistSquared(StrokePoints.Last(), HoverPosition) > 1.0)
+        {
+            StrokePoints.Add(HoverPosition);
+            StrokeViewport = Viewport;
+            Status = LOCTEXT("PointAdded", "控制点已添加。继续单击，或完成当前线后画下一条。");
+        }
+        else
+        {
+            Status = LOCTEXT("DuplicatePoint", "该点与上一点过近，请选择其他位置。");
+        }
+        return true;
+    }
     StrokePoints = { HoverPosition };
     StrokeTarget = Target;
     StrokeViewport = Viewport;
     bDrawing = true;
+    bPointByPointStroke = IsClickPointMode();
     bHadSurfaceGap = false;
     return true;
 }
@@ -403,7 +459,7 @@ void FBiomeSplinePainterEdMode::CommitStroke()
         return;
     }
     ABiomeSplinePainterActor* Target = StrokeTarget.Get();
-    if (bHasHover && !StrokePoints.IsEmpty() && !bHadSurfaceGap
+    if (!bPointByPointStroke && bHasHover && !StrokePoints.IsEmpty() && !bHadSurfaceGap
         && FVector::DistSquared(StrokePoints.Last(), HoverPosition) > 1.0)
     {
         StrokePoints.Add(HoverPosition);
@@ -418,10 +474,16 @@ void FBiomeSplinePainterEdMode::CommitStroke()
     {
         const FScopedTransaction Transaction(LOCTEXT("StrokeTransaction", "绘制一条 Biome 样条"));
         SelectSpline(Target->AddPaintedSpline(StrokePoints, Settings->bSmooth));
-        Status = LOCTEXT("StrokeSaved", "样条已提交。再次按住左键绘制另一条独立样条。");
+        Status = LOCTEXT("StrokeSaved", "样条已提交，可以开始绘制下一条独立样条。");
     }
     else
     {
+        if (bPointByPointStroke && IsValid(Target) && Target == Settings->TargetActor.Get()
+            && !FLevelUtils::IsLevelLocked(Target))
+        {
+            Status = LOCTEXT("NeedMorePoints", "当前线至少需要两个不同的点，并达到最短有效长度；可以继续添加点或取消。");
+            return;
+        }
         Status = LOCTEXT("StrokeTooShort", "笔画过短或目标不可编辑，未保存本条线。");
     }
     CancelStroke();
@@ -430,10 +492,76 @@ void FBiomeSplinePainterEdMode::CommitStroke()
 void FBiomeSplinePainterEdMode::CancelStroke()
 {
     bDrawing = false;
+    bPointByPointStroke = false;
     StrokePoints.Reset();
     StrokeTarget.Reset();
     StrokeViewport = nullptr;
     bHadSurfaceGap = false;
+}
+
+bool FBiomeSplinePainterEdMode::CanCompleteCurrentSpline() const
+{
+    if (!HasPendingPointSpline() || !IsClickPointMode() || StrokePoints.Num() < 2 || !StrokeTarget.IsValid()
+        || StrokeTarget != Settings->TargetActor || FLevelUtils::IsLevelLocked(StrokeTarget.Get()))
+    {
+        return false;
+    }
+    double Length = 0.0;
+    for (int32 Index = 1; Index < StrokePoints.Num(); ++Index)
+    {
+        Length += FVector::Distance(StrokePoints[Index - 1], StrokePoints[Index]);
+    }
+    return Length >= FMath::Max(1.0, Settings->MinStrokeLength);
+}
+
+void FBiomeSplinePainterEdMode::CompleteCurrentSpline()
+{
+    if (HasPendingPointSpline() && !IsClickPointMode())
+    {
+        CancelCurrentSpline();
+        return;
+    }
+    if (HasPendingPointSpline())
+    {
+        CommitStroke();
+        bLeftSequence = false;
+        if (GEditor)
+        {
+            GEditor->RedrawLevelEditingViewports();
+        }
+    }
+}
+
+void FBiomeSplinePainterEdMode::RemoveLastClickedPoint()
+{
+    if (!HasPendingPointSpline())
+    {
+        return;
+    }
+    StrokePoints.Pop(EAllowShrinking::No);
+    if (StrokePoints.IsEmpty())
+    {
+        CancelStroke();
+        Status = LOCTEXT("NoPointsLeft", "已回退全部点，可以开始新线。");
+    }
+    else
+    {
+        Status = LOCTEXT("PointRemoved", "已移除最后一个确认点，可以继续点击补点。");
+    }
+    if (GEditor)
+    {
+        GEditor->RedrawLevelEditingViewports();
+    }
+}
+
+void FBiomeSplinePainterEdMode::CancelCurrentSpline()
+{
+    CancelStroke();
+    Status = LOCTEXT("Cancelled", "当前未提交的线已取消，已保存样条保留。");
+    if (GEditor)
+    {
+        GEditor->RedrawLevelEditingViewports();
+    }
 }
 
 bool FBiomeSplinePainterEdMode::MouseMove(FEditorViewportClient* Client, FViewport* Viewport, int32 X, int32 Y)
@@ -457,7 +585,7 @@ bool FBiomeSplinePainterEdMode::StartTracking(FEditorViewportClient* Client, FVi
 bool FBiomeSplinePainterEdMode::EndTracking(FEditorViewportClient* Client, FViewport* Viewport)
 {
     const bool bHandled = bLeftSequence;
-    if (bDrawing)
+    if (bDrawing && !bPointByPointStroke)
     {
         if (StrokeViewport == Viewport && !Viewport->KeyState(EKeys::LeftMouseButton))
         {
@@ -488,7 +616,11 @@ bool FBiomeSplinePainterEdMode::HandleClick(FEditorViewportClient*, HHitProxy*, 
 
 bool FBiomeSplinePainterEdMode::LostFocus(FEditorViewportClient* Client, FViewport* Viewport)
 {
-    CancelStroke();
+    // A point stroke must survive clicking its completion button or changing the camera.
+    if (!HasPendingPointSpline())
+    {
+        CancelStroke();
+    }
     bLeftSequence = false;
     bHasHover = false;
     return FEdMode::LostFocus(Client, Viewport);
@@ -497,6 +629,11 @@ bool FBiomeSplinePainterEdMode::LostFocus(FEditorViewportClient* Client, FViewpo
 void FBiomeSplinePainterEdMode::Tick(FEditorViewportClient* Client, float DeltaTime)
 {
     FEdMode::Tick(Client, DeltaTime);
+    if (bDrawing && bPointByPointStroke != IsClickPointMode())
+    {
+        CancelCurrentSpline();
+        Status = LOCTEXT("ModeChanged", "绘制方式已切换，未提交的线已取消；已保存样条保留。");
+    }
     if (bDrawing && (!StrokeTarget.IsValid() || StrokeTarget != Settings->TargetActor))
     {
         CancelStroke();
@@ -525,9 +662,17 @@ void FBiomeSplinePainterEdMode::Render(const FSceneView* View, FViewport* Viewpo
     {
         PDI->DrawLine(StrokePoints[Index - 1], StrokePoints[Index], FLinearColor::Yellow, SDPG_Foreground, 2.0f);
     }
+    if (HasPendingPointSpline())
+    {
+        for (const FVector& Point : StrokePoints)
+        {
+            PDI->DrawPoint(Point, FLinearColor::Yellow, 9.0f, SDPG_Foreground);
+        }
+    }
     if (bDrawing && bHasHover && !StrokePoints.IsEmpty())
     {
-        PDI->DrawLine(StrokePoints.Last(), HoverPosition, FLinearColor::Yellow, SDPG_Foreground, 2.0f);
+        PDI->DrawLine(StrokePoints.Last(), HoverPosition,
+            bPointByPointStroke ? FLinearColor::Green : FLinearColor::Yellow, SDPG_Foreground, 2.0f);
     }
     if (UBiomePaintedSplineComponent* Spline = SelectedSpline.Get())
     {
@@ -554,6 +699,11 @@ void FBiomeSplinePainterEdMode::SelectSpline(UBiomePaintedSplineComponent* Splin
 
 void FBiomeSplinePainterEdMode::DeleteSelectedSpline()
 {
+    if (HasPendingPointSpline())
+    {
+        Status = LOCTEXT("CompleteBeforeDelete", "请先完成或取消正在逐点绘制的线，再删除已保存样条。");
+        return;
+    }
     CancelStroke();
     ABiomeSplinePainterActor* Target = Settings->TargetActor.Get();
     if (!Target || !SelectedSpline.IsValid() || FLevelUtils::IsLevelLocked(Target))
@@ -613,11 +763,20 @@ void FBiomeSplinePainterEdMode::MapChangeNotify()
 
 void FBiomeSplinePainterEdMode::HandleBeginPIE(bool)
 {
+    CancelStroke();
     Finish();
 }
 
 void FBiomeSplinePainterEdMode::Finish()
 {
+    if (HasPendingPointSpline())
+    {
+        CompleteCurrentSpline();
+        if (HasPendingPointSpline())
+        {
+            return; // Do not silently discard an incomplete click-point line.
+        }
+    }
     GLevelEditorModeTools().DeactivateMode(ModeId);
 }
 

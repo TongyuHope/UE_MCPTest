@@ -6,9 +6,8 @@
 #include "ProjectionDebug.generated.h"
 
 /**
- * Editor-only graph projection overlay. The visual is anchored to the graph viewport,
- * remains screen-sized while zooming, and cannot be selected or deleted through
- * normal graph-editor interaction.
+ * Retired overlay type kept only so existing assets and historical redirects still load.
+ * It no longer renders anything; the editor module removes saved instances on open/save.
  */
 UCLASS()
 class BIOMEPCGEDITOR_API UProjectionDebug : public UEdGraphNode
@@ -18,7 +17,7 @@ class BIOMEPCGEDITOR_API UProjectionDebug : public UEdGraphNode
 public:
     UProjectionDebug(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
-    virtual bool CanUserDeleteNode() const override { return false; }
+    virtual bool CanUserDeleteNode() const override { return true; }
     virtual bool CanDuplicateNode() const override { return false; }
     virtual bool GetCanRenameNode() const override { return false; }
     virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
@@ -29,8 +28,7 @@ public:
     static const FString& GetProjectionDebugText();
 };
 
-/** Blueprint-compatible projection overlay. Kismet requires decorative graph nodes to
- * derive from a supported comment/documentation class. */
+/** Retired Blueprint comment-node compatibility type; no text or overlay is drawn. */
 UCLASS()
 class BIOMEPCGEDITOR_API UBlueprintProjectionDebug : public UEdGraphNode_Comment
 {
@@ -39,7 +37,7 @@ class BIOMEPCGEDITOR_API UBlueprintProjectionDebug : public UEdGraphNode_Comment
 public:
     UBlueprintProjectionDebug(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
-    virtual bool CanUserDeleteNode() const override { return false; }
+    virtual bool CanUserDeleteNode() const override { return true; }
     virtual bool CanDuplicateNode() const override { return false; }
     virtual bool GetCanRenameNode() const override { return false; }
     virtual void OnRenameNode(const FString& NewName) override;

@@ -39,7 +39,7 @@ FBiomeSplinePainterToolkit::FBiomeSplinePainterToolkit(FBiomeSplinePainterEdMode
             + SVerticalBox::Slot().AutoHeight().Padding(0, 4)
             [
                 SNew(STextBlock).AutoWrapText(true).Text(LOCTEXT("Instructions",
-                    "单击地表放置 Actor（此次不画线）。\n之后每次按住左键拖动，松开提交一条新线。\nEsc 取消当前笔画；空闲时 Esc 退出。Alt/右键保留视口导航。\n完成后可用原生样条控制点继续编辑，请保存关卡和新建蓝图。"))
+                    "单击地表放置 Actor（此次不画线），然后选择绘制方式。\n长按拖动：按住画线，松开提交。\n逐点点击：单击确认各点，Enter 或“完成当前线”提交，再画下一条；Backspace 回退一点。\nEsc 取消当前线；空闲时 Esc 退出。Alt/右键保留视口导航。\n完成后可用原生样条控制点继续编辑，请保存关卡和新建蓝图。"))
             ]
             + SVerticalBox::Slot().AutoHeight().Padding(0, 6)
             [ SNew(STextBlock).AutoWrapText(true).Text_Lambda([this]() { return Painter->GetStatus(); }) ]
@@ -48,6 +48,39 @@ FBiomeSplinePainterToolkit::FBiomeSplinePainterToolkit(FBiomeSplinePainterEdMode
             + SVerticalBox::Slot().AutoHeight().Padding(0, 3)
             [ Button(LOCTEXT("NewActor", "放置新的 Actor"), [this]() { Painter->NewTarget(); }) ]
             + SVerticalBox::Slot().AutoHeight()[ Details ]
+            + SVerticalBox::Slot().AutoHeight().Padding(0, 3)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("CompleteLine", "完成当前线 / 绘制下一条（Enter）"))
+                .IsEnabled_Lambda([this]() { return Painter->CanCompleteCurrentSpline(); })
+                .OnClicked_Lambda([this]()
+                {
+                    Painter->CompleteCurrentSpline();
+                    return FReply::Handled();
+                })
+            ]
+            + SVerticalBox::Slot().AutoHeight().Padding(0, 3)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("RemoveLastPoint", "回退最后一点（Backspace）"))
+                .IsEnabled_Lambda([this]() { return Painter->HasPendingPointSpline(); })
+                .OnClicked_Lambda([this]()
+                {
+                    Painter->RemoveLastClickedPoint();
+                    return FReply::Handled();
+                })
+            ]
+            + SVerticalBox::Slot().AutoHeight().Padding(0, 3)
+            [
+                SNew(SButton)
+                .Text(LOCTEXT("CancelLine", "取消当前逐点线"))
+                .IsEnabled_Lambda([this]() { return Painter->HasPendingPointSpline(); })
+                .OnClicked_Lambda([this]()
+                {
+                    Painter->CancelCurrentSpline();
+                    return FReply::Handled();
+                })
+            ]
             + SVerticalBox::Slot().AutoHeight().Padding(0, 3)
             [ Button(LOCTEXT("ApplyGraph", "将图和自动刷新设置应用到目标"), [this]() { Painter->ApplyGraph(); }) ]
             + SVerticalBox::Slot().AutoHeight()

@@ -5,11 +5,12 @@
 - `D:\UEProjectReal\PCGBiome_test\Plugins\PCGSenc\Source`
 - `D:\UEProjectReal\PCGBiome_test\Source\PCG_Senc`
 
-保留原有节点算法、默认参数、界面文字及 ProjectionDebug 覆盖层行为。
+保留原有功能节点算法和默认参数；旧 ProjectionDebug 水印已停用，保留类型用于兼容旧资产并清理残留节点。
 
 ## 功能和入口
 
 新增多样条绘制工具：`TA Tools → 绘制样条植被`。单击地表放置蓝图 Actor，之后每次按住左键绘制一条独立样条，松开提交。
+面板“绘制方式”还可选择“逐点点击”：单击依次确认控制点，按 Enter 或点击“完成当前线 / 绘制下一条”提交；支持 Backspace 回退和 Esc 取消。
 首次放置可自动创建 `/Game/PCG/BP_PCG/BP_BiomeSplinePainter`，PCG 图由用户指定。
 详细操作与待验收项目见工程 `Docs/BiomePCG/SplineVegetationPainterUsage.md`。
 此功能尚未运行 C++ 编译或编辑器交互验证。
@@ -21,7 +22,7 @@
 | Collision Preset Manager | 通过 `Window → TA Tools → Collision Preset Manager` 打开，选择文件夹或 StaticMesh 资产后批量修改并保存碰撞预设。 |
 | 蓝图工具库 | `BiomePCG`、`BiomePCG\|Model Showcase`、`BiomePCG\|Collision Preset` 及 `PCG\|Foliage` 分类下提供原有工具函数。 |
 | Convert SMA | 在蓝图中调用 `PCG\|ConvertSMA → Convert ISM To Static Mesh Actors`，递归将 Actor 层级中的 ISM/HISM 实例转为独立 StaticMeshActor。保留变换、材质、阴影、Mobility 和网格碰撞预设，并放入指定文件夹；沿用原函数默认清空源实例的设置。 |
-| ProjectionDebug | 保留对 `/Game/PCG` 及其子目录中 Blueprint/PCG Graph 的打开、保存回调；自动插入并维护随视口缩放显示的图表覆盖层。 |
+| 旧水印清理 | 打开、保存 `/Game/PCG` 及其子目录中的 Blueprint/PCG Graph 时，只移除旧 ProjectionDebug 水印节点，不再插入任何水印。 |
 
 Foliage 烘焙新建或更新的 FoliageType 资产会标记为待保存，使用后应保存相关资产和关卡。
 
@@ -41,7 +42,7 @@ Foliage 烘焙新建或更新的 FoliageType 资产会标记为待保存，使�
 
 - `BiomePCGRuntime`（Runtime）：原工程模块中的五个 PCG 节点，以及 `ConvertSMALib`、`PCGToFoliageLib` 的蓝图工具类。公开依赖 Core、CoreUObject、Engine、PCG；转换工具所需的 AssetRegistry、Foliage、PhysicsCore、RenderCore、UnrealEd 依赖仅在编辑器构建中添加。
 - `BiomePCG`（Editor）：原 `PCGSenc` 工具库、Slate 面板和 TA Tools 菜单；通过依赖 `BiomePCGRuntime` 调用 Foliage 烘焙库。
-- `BiomePCGEditor`：原 `PCG_SencEditor` 的 ProjectionDebug 节点、资产回调和批处理功能。
+- `BiomePCGEditor`：样条绘制模式、面板、旧 ProjectionDebug 节点的兼容类型和清理回调。
 - `Source\PCG_Senc` 中七组功能 `.h/.cpp` 均已迁入 `Source/BiomePCGRuntime`：五组 PCG 节点、一组 ISM 转 StaticMeshActor、一组 Foliage 烘焙库。
 - 原工程的 `PCG_Senc.cpp` 只注册主游戏模块，`PCG_Senc.h` 只包含 CoreMinimal；插件使用自身模块入口替代，不复制 `IMPLEMENT_PRIMARY_GAME_MODULE`。原 `PCG_Senc.Build.cs` 的依赖按实际用途整合进插件 Build.cs，无需旧工程模块或额外头文件路径。
 - 原 `UPCGSencBPLibrary` 更名为 `UBiomePCGBPLibrary`；其他反射类型保留类名，更新模块名和导出宏。
@@ -64,9 +65,13 @@ Foliage 烘焙新建或更新的 FoliageType 资产会标记为待保存，使�
 
 ## 批处理入口
 
-保留原 `-ProjectionDebugApplyAll` 参数：扫描 `/Game/PCG` 下的 Blueprint/PCG Graph，更新覆盖层、保存变更并退出。
-报告输出到 `Saved/Codex/projection_debug_migration_report.json`。
+可选 `-ProjectionDebugRemoveAll` 参数：扫描 `/Game/PCG` 下的 Blueprint/PCG Graph，仅移除旧水印节点、保存变更并退出。
+报告输出到 `Saved/Codex/projection_debug_cleanup_report.json`。
+旧 `-ProjectionDebugApplyAll` 插入水印入口已移除。
 普通启动不会执行全量扫描保存；本次没有调用该批处理入口。
+
+已有 `BP_BiomeSplinePainter` 无需重建：编译并重启编辑器后，重新打开蓝图并保存，即可清除已序列化的旧水印节点。
+兼容类型本身也已停止绘制，可在清理保存前避免继续显示旧水印。清理仅针对插件的旧水印类型，不按文字内容删除用户自己的注释或功能节点。
 
 ## 验证
 

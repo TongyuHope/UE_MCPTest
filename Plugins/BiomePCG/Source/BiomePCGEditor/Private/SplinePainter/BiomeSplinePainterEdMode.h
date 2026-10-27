@@ -10,7 +10,7 @@ class UBiomeSplinePainterSettings;
 class UWorld;
 struct FHitResult;
 
-/** Viewport authoring mode. Strokes stay transient until mouse release commits a single transaction. */
+/** Viewport authoring mode. Freehand and click-point strokes commit as a single transaction. */
 class FBiomeSplinePainterEdMode : public FEdMode
 {
 public:
@@ -44,6 +44,11 @@ public:
     void RefreshPCG();
     void DeleteSelectedSpline();
     void SelectSpline(UBiomePaintedSplineComponent* Spline);
+    bool CanCompleteCurrentSpline() const;
+    bool HasPendingPointSpline() const { return bDrawing && bPointByPointStroke; }
+    void CompleteCurrentSpline();
+    void RemoveLastClickedPoint();
+    void CancelCurrentSpline();
     void Finish();
 
 private:
@@ -54,6 +59,7 @@ private:
     void CommitStroke();
     void CancelStroke();
     void HandleBeginPIE(bool bSimulating);
+    bool IsClickPointMode() const;
 
     TStrongObjectPtr<UBiomeSplinePainterSettings> Settings;
     TWeakObjectPtr<ABiomeSplinePainterActor> StrokeTarget;
@@ -62,6 +68,7 @@ private:
     FVector HoverPosition = FVector::ZeroVector;
     bool bHasHover = false;
     bool bDrawing = false;
+    bool bPointByPointStroke = false;
     bool bLeftSequence = false;
     bool bHadSurfaceGap = false;
     FViewport* StrokeViewport = nullptr;

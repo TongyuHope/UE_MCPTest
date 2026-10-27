@@ -8,6 +8,13 @@
 class ABiomeSplinePainterActor;
 class UPCGGraphInterface;
 
+UENUM()
+enum class EBiomeSplineDrawingMode : uint8
+{
+    Freehand UMETA(DisplayName = "长按拖动"),
+    ClickPoints UMETA(DisplayName = "逐点点击")
+};
+
 UCLASS(Transient)
 class UBiomeSplinePainterSettings : public UObject
 {
@@ -21,13 +28,16 @@ public:
     UPROPERTY(EditAnywhere, Category = "Target", meta = (DisplayName = "放置蓝图类（留空自动创建）"))
     TSubclassOf<ABiomeSplinePainterActor> ActorClass;
 
-    UPROPERTY(EditAnywhere, Category = "Drawing", meta = (DisplayName = "控制点最小间距 (cm)", ClampMin = "1.0"))
+    UPROPERTY(EditAnywhere, Category = "Drawing", meta = (DisplayName = "绘制方式"))
+    EBiomeSplineDrawingMode DrawingMode = EBiomeSplineDrawingMode::Freehand;
+
+    UPROPERTY(EditAnywhere, Category = "Drawing", meta = (DisplayName = "控制点最小间距 (cm)", ClampMin = "1.0", EditCondition = "DrawingMode == EBiomeSplineDrawingMode::Freehand", EditConditionHides))
     double MinPointSpacing = 100.0;
 
     UPROPERTY(EditAnywhere, Category = "Drawing", meta = (DisplayName = "最短有效笔画 (cm)", ClampMin = "1.0"))
     double MinStrokeLength = 10.0;
 
-    UPROPERTY(EditAnywhere, Category = "Drawing", meta = (DisplayName = "最大连续跨越距离 (cm)", ClampMin = "1.0"))
+    UPROPERTY(EditAnywhere, Category = "Drawing", meta = (DisplayName = "最大连续跨越距离 (cm)", ClampMin = "1.0", EditCondition = "DrawingMode == EBiomeSplineDrawingMode::Freehand", EditConditionHides))
     double MaxGapDistance = 2000.0;
 
     UPROPERTY(EditAnywhere, Category = "Drawing", meta = (DisplayName = "平滑曲线"))

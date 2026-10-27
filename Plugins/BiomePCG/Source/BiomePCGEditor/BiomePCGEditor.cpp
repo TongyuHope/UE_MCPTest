@@ -67,10 +67,10 @@ void FBiomePCGEditorModule::StartupModule()
         }
     }
 
-    if (FParse::Param(FCommandLine::Get(), TEXT("ProjectionDebugApplyAll")))
+    if (FParse::Param(FCommandLine::Get(), TEXT("ProjectionDebugRemoveAll")))
     {
-        MigrationTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-            FTickerDelegate::CreateRaw(this, &FBiomePCGEditorModule::RunRequestedMigration), 0.2f);
+        CleanupTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+            FTickerDelegate::CreateRaw(this, &FBiomePCGEditorModule::RunRequestedCleanup), 0.2f);
     }
 }
 
@@ -84,10 +84,10 @@ void FBiomePCGEditorModule::ShutdownModule()
         bSplinePainterRegistered = false;
     }
 
-    if (MigrationTickerHandle.IsValid())
+    if (CleanupTickerHandle.IsValid())
     {
-        FTSTicker::GetCoreTicker().RemoveTicker(MigrationTickerHandle);
-        MigrationTickerHandle.Reset();
+        FTSTicker::GetCoreTicker().RemoveTicker(CleanupTickerHandle);
+        CleanupTickerHandle.Reset();
     }
 
     if (AssetEditorOpeningHandle.IsValid() && GEditor)
@@ -114,7 +114,7 @@ void FBiomePCGEditorModule::RegisterSplinePainterMenu()
     Section.AddMenuEntry(
         "BiomeSplinePainter",
         LOCTEXT("SplinePainterMenu", "绘制样条植被"),
-        LOCTEXT("SplinePainterTooltip", "单击放置 Actor，之后每次按住左键绘制一条新样条。"),
+        LOCTEXT("SplinePainterTooltip", "单击放置 Actor，然后选择长按拖动或逐点点击来绘制独立样条。"),
         FSlateIcon(),
         FUIAction(FExecuteAction::CreateLambda([]()
         {
@@ -131,23 +131,23 @@ void FBiomePCGEditorModule::HandleAssetsOpening(
 {
     for (UObject* Asset : Assets)
     {
-        EnsureAssetProjectionDebug(Asset);
+        RemoveAssetProjectionDebug(Asset);
     }
 }
 
 void FBiomePCGEditorModule::HandleObjectPreSave(UObject* Object, FObjectPreSaveContext SaveContext)
 {
-    EnsureAssetProjectionDebug(Object);
+    RemoveAssetProjectionDebug(Object);
 }
 
-bool FBiomePCGEditorModule::RunRequestedMigration(float DeltaTime)
+bool FBiomePCGEditorModule::RunRequestedCleanup(float DeltaTime)
 {
-    MigrationTickerHandle.Reset();
-    ApplyAllProjectionDebugAndExit();
+    CleanupTickerHandle.Reset();
+    RemoveAllProjectionDebugAndExit();
     return false;
 }
 
-int32 FBiomePCGEditorModule::EnsureAssetProjectionDebug(UObject* Asset)
+int32 FBiomePCGEditorModule::RemoveAssetProjectionDebug(UObject* Asset)
 {
     if (!PCGProjectionDebug::IsInScope(Asset))
     {
@@ -156,18 +156,18 @@ int32 FBiomePCGEditorModule::EnsureAssetProjectionDebug(UObject* Asset)
 
     if (UBlueprint* Blueprint = Cast<UBlueprint>(Asset))
     {
-        return EnsureBlueprintProjectionDebug(Blueprint);
+        return RemoveBlueprintProjectionDebug(Blueprint);
     }
 
     if (UPCGGraph* PCGGraph = Cast<UPCGGraph>(Asset))
     {
-        return EnsurePCGGraphProjectionDebug(PCGGraph) ? 1 : 0;
+        return RemovePCGGraphProjectionDebug(PCGGraph) ? 1 : 0;
     }
 
     return 0;
 }
 
-int32 FBiomePCGEditorModule::EnsureBlueprintProjectionDebug(UBlueprint* Blueprint)
+int32 FBiomePCGEditorModule::RemoveBlueprintProjectionDebug(UBlueprint* Blueprint)
 {
     if (!Blueprint || !PCGProjectionDebug::IsInScope(Blueprint))
     {
@@ -180,7 +180,7 @@ int32 FBiomePCGEditorModule::EnsureBlueprintProjectionDebug(UBlueprint* Blueprin
     int32 ChangedGraphCount = 0;
     for (UEdGraph* Graph : Graphs)
     {
-        ChangedGraphCount += EnsureBlueprintGraphProjectionDebug(Graph) ? 1 : 0;
+        ChangedGraphCount += RemoveBlueprintGraphProjectionDebug(Graph) ? 1 : 0;
     }
 
     if (ChangedGraphCount > 0)
@@ -192,99 +192,69 @@ int32 FBiomePCGEditorModule::EnsureBlueprintProjectionDebug(UBlueprint* Blueprin
     return ChangedGraphCount;
 }
 
-bool FBiomePCGEditorModule::EnsureBlueprintGraphProjectionDebug(UEdGraph* Graph)
+bool FBiomePCGEditorModule::RemoveBlueprintGraphProjectionDebug(UEdGraph* Graph)
 {
     if (!Graph)
     {
         return false;
     }
 
-    UBlueprintProjectionDebug* ProjectionDebugNode = nullptr;
-    TArray<UProjectionDebug*> LegacyProjectionDebugNodes;
+    TArray<UEdGraphNode*> NodesToRemove;
     for (UEdGraphNode* Node : Graph->Nodes)
     {
-        if (UBlueprintProjectionDebug* Existing = Cast<UBlueprintProjectionDebug>(Node))
+        if (Node && (Node->IsA<UProjectionDebug>() || Node->IsA<UBlueprintProjectionDebug>()))
         {
-            ProjectionDebugNode = Existing;
-        }
-        else if (UProjectionDebug* Legacy = Cast<UProjectionDebug>(Node))
-        {
-            LegacyProjectionDebugNodes.Add(Legacy);
+            NodesToRemove.Add(Node);
         }
     }
-
-    bool bChanged = false;
-    if (!LegacyProjectionDebugNodes.IsEmpty())
+    if (NodesToRemove.IsEmpty())
     {
-        Graph->Modify();
-        for (UProjectionDebug* Legacy : LegacyProjectionDebugNodes)
-        {
-            Graph->Nodes.Remove(Legacy);
-        }
-        bChanged = true;
+        return false;
     }
 
-    if (!ProjectionDebugNode)
+    Graph->Modify();
+    for (UEdGraphNode* Node : NodesToRemove)
     {
-        Graph->Modify();
-        ProjectionDebugNode = NewObject<UBlueprintProjectionDebug>(Graph, NAME_None, RF_Transactional);
-        ProjectionDebugNode->CreateNewGuid();
-        ProjectionDebugNode->PostPlacedNewNode();
-        ProjectionDebugNode->AllocateDefaultPins();
-        Graph->AddNode(ProjectionDebugNode, false, false);
-        bChanged = true;
+        Node->Modify();
+        Graph->RemoveNode(Node);
     }
-
-    bChanged |= ProjectionDebugNode->EnforceProjectionDebugProperties();
-
-    if (bChanged)
-    {
-        Graph->NotifyGraphChanged();
-    }
-
-    return bChanged;
+    Graph->NotifyGraphChanged();
+    return true;
 }
 
-bool FBiomePCGEditorModule::EnsurePCGGraphProjectionDebug(UPCGGraph* PCGGraph)
+bool FBiomePCGEditorModule::RemovePCGGraphProjectionDebug(UPCGGraph* PCGGraph)
 {
     if (!PCGGraph || !PCGProjectionDebug::IsInScope(PCGGraph))
     {
         return false;
     }
 
-    for (UObject* ExtraNode : PCGGraph->GetExtraEditorNodes())
-    {
-        if (UProjectionDebug* Existing = Cast<UProjectionDebug>(ExtraNode))
-        {
-            if (Existing->EnforceProjectionDebugProperties())
-            {
-                PCGGraph->MarkPackageDirty();
-                return true;
-            }
-            return false;
-        }
-    }
-
-    TArray<TObjectPtr<const UObject>> ExtraNodes;
-    ExtraNodes.Reserve(PCGGraph->GetExtraEditorNodes().Num() + 1);
+    TArray<TObjectPtr<const UObject>> RetainedNodes;
+    RetainedNodes.Reserve(PCGGraph->GetExtraEditorNodes().Num());
+    bool bRemoved = false;
     for (const UObject* ExtraNode : PCGGraph->GetExtraEditorNodes())
     {
-        ExtraNodes.Add(ExtraNode);
+        if (ExtraNode && (ExtraNode->IsA<UProjectionDebug>() || ExtraNode->IsA<UBlueprintProjectionDebug>()))
+        {
+            bRemoved = true;
+        }
+        else
+        {
+            RetainedNodes.Add(ExtraNode);
+        }
+    }
+    if (!bRemoved)
+    {
+        return false;
     }
 
-    UProjectionDebug* ProjectionDebugNode = NewObject<UProjectionDebug>(GetTransientPackage());
-    ProjectionDebugNode->CreateNewGuid();
-    ProjectionDebugNode->PostPlacedNewNode();
-    ProjectionDebugNode->AllocateDefaultPins();
-    ExtraNodes.Add(ProjectionDebugNode);
-
     PCGGraph->Modify();
-    PCGGraph->SetExtraEditorNodes(ExtraNodes);
+    PCGGraph->SetExtraEditorNodes(RetainedNodes);
     PCGGraph->MarkPackageDirty();
     return true;
 }
 
-void FBiomePCGEditorModule::ApplyAllProjectionDebugAndExit()
+void FBiomePCGEditorModule::RemoveAllProjectionDebugAndExit()
 {
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(
         TEXT("AssetRegistry"));
@@ -308,7 +278,7 @@ void FBiomePCGEditorModule::ApplyAllProjectionDebugAndExit()
         }
 
         ++MatchingAssetCount;
-        const int32 AssetModifiedGraphCount = EnsureAssetProjectionDebug(Asset);
+        const int32 AssetModifiedGraphCount = RemoveAssetProjectionDebug(Asset);
         if (AssetModifiedGraphCount > 0)
         {
             ModifiedGraphCount += AssetModifiedGraphCount;
@@ -326,7 +296,7 @@ void FBiomePCGEditorModule::ApplyAllProjectionDebugAndExit()
     Report->SetNumberField(TEXT("modified_asset_count"), PackagesToSave.Num());
     Report->SetNumberField(TEXT("modified_graph_count"), ModifiedGraphCount);
     Report->SetBoolField(TEXT("save_succeeded"), bSaveSucceeded);
-    Report->SetStringField(TEXT("projection_debug_text"), UProjectionDebug::GetProjectionDebugText());
+    Report->SetStringField(TEXT("operation"), TEXT("remove_legacy_watermark_nodes"));
     Report->SetArrayField(TEXT("modified_assets"), ModifiedAssetValues);
 
     FString ReportText;
@@ -335,11 +305,11 @@ void FBiomePCGEditorModule::ApplyAllProjectionDebugAndExit()
 
     const FString ReportDirectory = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Codex"));
     IFileManager::Get().MakeDirectory(*ReportDirectory, true);
-    const FString ReportPath = FPaths::Combine(ReportDirectory, TEXT("projection_debug_migration_report.json"));
+    const FString ReportPath = FPaths::Combine(ReportDirectory, TEXT("projection_debug_cleanup_report.json"));
     FFileHelper::SaveStringToFile(ReportText, *ReportPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 
     UE_LOG(LogTemp, Display,
-        TEXT("ProjectionDebug migration: scanned=%d matching=%d modified_assets=%d modified_graphs=%d saved=%s report=%s"),
+        TEXT("ProjectionDebug cleanup: scanned=%d matching=%d modified_assets=%d modified_graphs=%d saved=%s report=%s"),
         Assets.Num(), MatchingAssetCount, PackagesToSave.Num(), ModifiedGraphCount,
         bSaveSucceeded ? TEXT("true") : TEXT("false"), *ReportPath);
 
