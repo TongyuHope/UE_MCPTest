@@ -17,9 +17,17 @@
 !/Source/UE_MCPTest/Public/
 
 /Plugins/*
+!/Plugins/BiomePCG/
 !/Plugins/WorldPartitionRVTBake/
 !/Plugins/TYWaterfallTools/
 !/Plugins/TerraceTools/
+
+/Plugins/BiomePCG/*
+!/Plugins/BiomePCG/Source/
+!/Plugins/BiomePCG/Config/
+!/Plugins/BiomePCG/Resources/
+!/Plugins/BiomePCG/BiomePCG.uplugin
+!/Plugins/BiomePCG/README.md
 
 /Plugins/TerraceTools/*
 !/Plugins/TerraceTools/Source/
