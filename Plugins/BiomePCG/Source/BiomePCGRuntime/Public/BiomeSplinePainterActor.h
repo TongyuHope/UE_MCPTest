@@ -42,6 +42,7 @@ public:
     void RequestPCGRefresh(bool bForce = false);
 
     virtual void OnConstruction(const FTransform& Transform) override;
+    virtual void PostLoad() override;
     virtual void PostEditMove(bool bFinished) override;
     virtual void PostEditUndo() override;
     virtual void PostEditUndo(TSharedPtr<ITransactionObjectAnnotation> TransactionAnnotation) override;
@@ -49,7 +50,12 @@ public:
     virtual void BeginDestroy() override;
 
 private:
+    bool ProcessPCGRefresh(float DeltaTime);
     FTSTicker::FDelegateHandle RefreshTickerHandle;
+    TWeakObjectPtr<UPCGComponent> RefreshSource;
     bool bForcePendingRefresh = false;
+    bool bRefreshRequested = false;
+    bool bWaitingForCleanup = false;
+    bool bNeedsResourceRecovery = true;
 #endif
 };

@@ -15,6 +15,9 @@
 详细操作与待验收项目见工程 `Docs/BiomePCG/SplineVegetationPainterUsage.md`。
 此功能尚未运行 C++ 编译或编辑器交互验证。
 
+样条刷新改为针对当前 Actor 的“清理完成后再生成”，并在加载后首次编辑、撤销和手动刷新时恢复旧 PCG 资源记录；不会调用全场景清理。
+用于处理日志中 `Null generated resource encountered` 对应的旧输出残留；修复仍待用户编译并验证重开项目的复现流程。
+
 | 功能 | 使用方式 |
 | --- | --- |
 | Model Showcase / 资产排列 | 在 Content Browser 选择文件夹，在场景中选择作为排列原点的 Actor，通过顶栏 `TA Tools → 资产排列` 打开。支持 X/Y 行轴、尺寸排序、自动适配、文件夹及高度文字。 |

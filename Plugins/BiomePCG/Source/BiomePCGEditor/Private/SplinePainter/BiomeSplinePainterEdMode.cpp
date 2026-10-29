@@ -83,6 +83,10 @@ FText FBiomeSplinePainterEdMode::GetStatus() const
         {
             Text += TEXT("\n未指定 PCG 图；仍可绘制和保存样条。");
         }
+        else if (Target->PCGComponent->IsCleaningUp())
+        {
+            Text += TEXT("\nPCG 正在清理该 Actor 的旧输出，完成后重新生成。");
+        }
         else if (Target->PCGComponent->IsGenerating())
         {
             Text += TEXT("\nPCG 正在生成；后续刷新将合并等待。");

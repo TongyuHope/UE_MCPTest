@@ -5,6 +5,15 @@
 #include "Engine/World.h"
 #include "PCGComponent.h"
 
+#if WITH_EDITOR
+#include "Editor.h"
+#include "PCGManagedResourceContainer.h"
+#include "Subsystems/PCGSubsystem.h"
+#include "UObject/UObjectGlobals.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogBiomeSplinePainter, Log, All);
+#endif
+
 ABiomeSplinePainterActor::ABiomeSplinePainterActor()
 {
     PrimaryActorTick.bCanEverTick = false;
@@ -97,38 +106,151 @@ void ABiomeSplinePainterActor::RequestPCGRefresh(bool bForce)
     {
         return;
     }
-    PCGComponent->DirtyGenerated(EPCGComponentDirtyFlag::Actor | EPCGComponentDirtyFlag::Input | EPCGComponentDirtyFlag::Data);
+    bRefreshRequested = true;
     bForcePendingRefresh |= bForce;
-    if ((!bAutoRefreshPCG && !bForcePendingRefresh) || RefreshTickerHandle.IsValid())
+    if (!RefreshTickerHandle.IsValid())
     {
-        return;
+        RefreshTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
+            FTickerDelegate::CreateWeakLambda(this, [this](float DeltaTime)
+            {
+                return ProcessPCGRefresh(DeltaTime);
+            }), 0.2f);
+    }
+}
+
+bool ABiomeSplinePainterActor::ProcessPCGRefresh(float DeltaTime)
+{
+    auto StopRefresh = [this]()
+    {
+        RefreshTickerHandle.Reset();
+        bWaitingForCleanup = false;
+        bForcePendingRefresh = false;
+        bRefreshRequested = false;
+        return false;
+    };
+    if (!GetWorld() || GetWorld()->WorldType != EWorldType::Editor || IsActorBeingDestroyed()
+        || !IsValid(PCGComponent))
+    {
+        return StopRefresh();
+    }
+    // Defer world/resource mutation until load, save and editor transactions have finished.
+    if (!PCGComponent->IsRegistered() || UE::IsSavingPackage(this)
+        || (GEditor && (GEditor->PlayWorld || GEditor->IsTransactionActive())))
+    {
+        return true;
+    }
+    if (PCGComponent->IsManagedByRuntimeGenSystem())
+    {
+        return StopRefresh();
+    }
+    UPCGSubsystem* Subsystem = PCGComponent->GetSubsystem();
+    if (!Subsystem)
+    {
+        return true;
+    }
+    if (RefreshSource.Get() != PCGComponent.Get())
+    {
+        RefreshSource = PCGComponent;
+        bWaitingForCleanup = false;
+        bRefreshRequested = true;
+        // Construction-script reinstancing can replace the PCG component and its resource list.
+        bNeedsResourceRecovery = true;
     }
 
-    // Coalesce visualizer edits and undo callbacks, and wait for an in-flight PCG task.
-    RefreshTickerHandle = FTSTicker::GetCoreTicker().AddTicker(
-        FTickerDelegate::CreateWeakLambda(this, [this](float)
+    TArray<UPCGComponent*> Sources = { PCGComponent.Get() };
+    Subsystem->ForAllRegisteredLocalComponents(PCGComponent, [&Sources](UPCGComponent* Local)
+    {
+        if (IsValid(Local))
         {
-            if (!GetWorld() || GetWorld()->WorldType != EWorldType::Editor || IsActorBeingDestroyed()
-                || !IsValid(PCGComponent) || !PCGComponent->IsRegistered())
-            {
-                RefreshTickerHandle.Reset();
-                bForcePendingRefresh = false;
-                return false;
-            }
-            if (PCGComponent->IsGenerating() || PCGComponent->IsCleaningUp())
-            {
-                return true;
-            }
-            const bool bGenerate = bForcePendingRefresh || bAutoRefreshPCG;
+            Sources.AddUnique(Local);
+        }
+    });
+    for (UPCGComponent* Source : Sources)
+    {
+        if (Source->IsGenerating() || Source->IsCleaningUp() || Source->IsRefreshInProgress()
+            || !Source->AreManagedResourcesAccessible())
+        {
+            return true;
+        }
+    }
+
+    if (!bAutoRefreshPCG && !bForcePendingRefresh)
+    {
+        PCGComponent->DirtyGenerated(EPCGComponentDirtyFlag::All);
+        return StopRefresh();
+    }
+    if (bWaitingForCleanup)
+    {
+        bWaitingForCleanup = false;
+        // Undo or another edit during asynchronous cleanup may have restored old resources.
+        // Clean that newer state too, rather than consuming its request before generation.
+        if (!bRefreshRequested && !bNeedsResourceRecovery)
+        {
             bForcePendingRefresh = false;
-            RefreshTickerHandle.Reset();
-            if (bGenerate && PCGComponent->GetGraph() && !PCGComponent->IsManagedByRuntimeGenSystem())
+            PCGComponent->DirtyGenerated(EPCGComponentDirtyFlag::All);
+            PCGComponent->ResetLastGeneratedBounds();
+            if (PCGComponent->GetGraph())
             {
-                PCGComponent->DirtyGenerated(EPCGComponentDirtyFlag::All);
                 PCGComponent->GenerateLocal(true);
             }
-            return false;
-        }), 0.2f);
+            MarkPackageDirty();
+            return true;
+        }
+    }
+    if (!bRefreshRequested)
+    {
+        return StopRefresh();
+    }
+
+    bool bRecoverUnlinkedResources = bNeedsResourceRecovery || bForcePendingRefresh;
+    int32 InvalidResourceCount = 0;
+    for (UPCGComponent* Source : Sources)
+    {
+        // Operate only on this component and its own registered partition components.
+        // Remove broken records before the engine cleanup task visits them.
+        FPCGManagedResourceContainerHelper Resources(Source);
+        TArray<TObjectPtr<UPCGManagedResource>> Managed = Resources.GetManagedResourcesCopy();
+        const int32 Removed = Managed.RemoveAll([](const TObjectPtr<UPCGManagedResource>& Resource)
+        {
+            return !IsValid(Resource.Get());
+        });
+        if (Removed > 0)
+        {
+            Source->Modify();
+            Resources.SetManagedResources(MoveTemp(Managed));
+            InvalidResourceCount += Removed;
+            bRecoverUnlinkedResources = true;
+        }
+    }
+    if (InvalidResourceCount > 0)
+    {
+        UE_LOG(LogBiomeSplinePainter, Display,
+            TEXT("%s: removed %d invalid PCG resource records; recovering only this painter's generated output."),
+            *GetPathName(), InvalidResourceCount);
+    }
+
+    PCGComponent->Modify();
+    PCGComponent->DirtyGenerated(EPCGComponentDirtyFlag::All);
+    bWaitingForCleanup = true;
+    bRefreshRequested = false;
+    bNeedsResourceRecovery = false;
+    if (bRecoverUnlinkedResources)
+    {
+        // This is the engine's per-component cleanup/purge path, not the global menu operation.
+        PCGComponent->CleanupLocalDeleteAllGeneratedObjects({});
+    }
+    else
+    {
+        PCGComponent->CleanupLocal(true);
+    }
+    return true; // Regenerate on a later tick, after cleanup/local partition tasks finish.
+}
+
+void ABiomeSplinePainterActor::PostLoad()
+{
+    Super::PostLoad();
+    // Retain the saved vegetation on load; recover it when the user first edits or refreshes.
+    bNeedsResourceRecovery = true;
 }
 
 void ABiomeSplinePainterActor::OnConstruction(const FTransform& Transform)
@@ -150,12 +272,14 @@ void ABiomeSplinePainterActor::PostEditMove(bool bFinished)
 void ABiomeSplinePainterActor::PostEditUndo()
 {
     Super::PostEditUndo();
+    bNeedsResourceRecovery = true;
     RequestPCGRefresh();
 }
 
 void ABiomeSplinePainterActor::PostEditUndo(TSharedPtr<ITransactionObjectAnnotation> TransactionAnnotation)
 {
     Super::PostEditUndo(TransactionAnnotation);
+    bNeedsResourceRecovery = true;
     RequestPCGRefresh();
 }
 
